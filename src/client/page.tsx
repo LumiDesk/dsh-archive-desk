@@ -756,17 +756,19 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
                   </button>
                 )}
               </div>
-              <select
-                className="adk-select"
-                value={sort}
-                aria-label={t('sort.label')}
-                onChange={(event) => setSort(event.target.value as SortMode)}
-              >
-                <option value="recent">{t('sort.recent')}</option>
-                <option value="size">{t('sort.size')}</option>
-                <option value="title">{t('sort.title')}</option>
-                <option value="archive">{t('sort.archive')}</option>
-              </select>
+              <div className="adk-sort">
+                <select
+                  className="adk-select"
+                  value={sort}
+                  aria-label={t('sort.label')}
+                  onChange={(event) => setSort(event.target.value as SortMode)}
+                >
+                  <option value="recent">{t('sort.recent')}</option>
+                  <option value="size">{t('sort.size')}</option>
+                  <option value="title">{t('sort.title')}</option>
+                  <option value="archive">{t('sort.archive')}</option>
+                </select>
+              </div>
               <span className="adk-toolbar-spacer" />
               {selectedIds.length > 0 && (
                 <span className="adk-selected">
@@ -1119,7 +1121,13 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
 
       {pending !== null && (
         <ConfirmDialog
-          key={`${pending.kind}-${dialogMode}-${pending.kind === 'delete' ? pending.ids.join(',') : pending.kind === 'purge' ? pending.trashIds.join(',') : 'all'}`}
+          key={
+            pending.kind === 'delete'
+              ? `delete-${pending.ids.join(',')}`
+              : pending.kind === 'purge'
+                ? `purge-${pending.trashIds.join(',')}`
+                : 'empty'
+          }
           t={t}
           pending={pending}
           preview={preview}

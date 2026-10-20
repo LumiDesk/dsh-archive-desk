@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import {
   Button,
@@ -32,9 +32,13 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     props
   const [acknowledged, setAcknowledged] = useState(false)
 
-  useEffect(() => {
+  const selectMode = (next: DeleteMode): void => {
+    // Reset acknowledgement in the same event as the mode change. Doing it in
+    // an effect made the whole dialog render twice, which read as a flicker
+    // while switching between the two radio cards.
     setAcknowledged(false)
-  }, [pending, mode])
+    onMode(next)
+  }
 
   const isDelete = pending.kind === 'delete'
   const isPurge = !isDelete || mode === 'purge'
@@ -157,7 +161,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                 name="archive-desk-delete-mode"
                 checked={mode === 'trash'}
                 disabled={busy}
-                onChange={() => onMode('trash')}
+                onChange={() => selectMode('trash')}
               />
               <span className="adk-choice-body">
                 <span className="adk-choice-title">{t('confirm.option.trash')}</span>
@@ -170,7 +174,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                 name="archive-desk-delete-mode"
                 checked={mode === 'purge'}
                 disabled={busy}
-                onChange={() => onMode('purge')}
+                onChange={() => selectMode('purge')}
               />
               <span className="adk-choice-body">
                 <span className="adk-choice-title">{t('confirm.option.purge')}</span>
