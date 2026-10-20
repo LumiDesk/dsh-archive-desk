@@ -71,6 +71,7 @@ interface ListResult {
   offset: number
   limit: number
   totalBytes: number
+  missing: number
   matchingIds: string[]
   items: ArchivedItem[]
 }
@@ -309,6 +310,11 @@ const zh: Record<string, string> = {
   'notice.restored': '已恢复 {count} 个会话',
   'notice.purged': '已彻底删除 {count} 个条目，释放 {size}',
   'notice.dangling': '已清理 {count} 条失效引用',
+  'action.cleanDangling': '清理失效引用（{count}）',
+  'hint.missing':
+    '其中 {count} 条引用指向的会话日志已不在磁盘上（可能是早前的手工清理留下的悬空引用），可以一键清理。',
+  'row.missingTitle': '已失效会话 · {id}',
+  'row.missingSnippet': '会话日志已不在磁盘上，只剩归档引用',
   'notice.keep': '已跳过 {count} 个无法删除的会话',
   'confirm.deleteTitle': '删除 {count} 个归档对话？',
   'confirm.emptyTitle': '清空回收站？',
@@ -348,6 +354,11 @@ const en: Record<string, string> = {
   'notice.restored': 'Restored {count} conversations',
   'notice.purged': 'Permanently deleted {count} entries, freed {size}',
   'notice.dangling': 'Dropped {count} dangling references',
+  'action.cleanDangling': 'Clean up {count} dangling',
+  'hint.missing':
+    '{count} references point at sessions whose logs are gone (left behind by an earlier manual cleanup). They can be removed in one go.',
+  'row.missingTitle': 'Missing session · {id}',
+  'row.missingSnippet': 'The session log is gone; only the archive reference remains',
   'notice.keep': 'Skipped {count} conversations that could not be deleted',
   'confirm.deleteTitle': 'Delete {count} archived conversations?',
   'confirm.emptyTitle': 'Empty the recycle bin?',
@@ -369,6 +380,13 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
   return `${bytes} B`
+}
+
+/** Tail of a session id, for rows whose log is gone and has no title. */
+function shortSessionId(id: string): string {
+  return id.startsWith('session-')
+    ? id.slice('session-'.length, 'session-'.length + 8)
+    : id.slice(0, 8)
 }
 
 function formatTime(value: number | string): string {
@@ -555,6 +573,7 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
     offset: 0,
     limit: PAGE_SIZE,
     totalBytes: 0,
+    missing: 0,
     matchingIds: [],
     items: [],
   })
@@ -711,7 +730,7 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
     })
   }
 
-  const missing = list.items.filter((item) => item.status === 'missing').length
+  const missing = list.missing
   const totalPages = Math.max(1, Math.ceil(list.total / PAGE_SIZE))
   const selectedBytes = list.items
     .filter((item) => selectedSet.has(item.id))
@@ -749,6 +768,9 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
 
       {tab === 'archived' ? (
         <>
+          {missing > 0 && (
+            <div style={styles.banner('info')}>{t('hint.missing', { count: missing })}</div>
+          )}
           <div style={styles.toolbar}>
             <input
               style={styles.search}
@@ -763,7 +785,7 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
             <span style={styles.meta}>{t('selection.count', { count: selected.length })}</span>
             {missing > 0 && (
               <button type="button" style={styles.button} onClick={cleanDangling} disabled={busy}>
-                {t('notice.dangling', { count: missing })}
+                {t('action.cleanDangling', { count: missing })}
               </button>
             )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
@@ -806,8 +828,14 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
                     onChange={() => toggle(item.id)}
                   />
                   <div style={{ minWidth: 0 }}>
-                    <span style={styles.rowTitle}>{item.title}</span>
-                    <span style={styles.rowSnippet}>{item.snippet}</span>
+                    <span style={styles.rowTitle}>
+                      {item.status === 'missing'
+                        ? t('row.missingTitle', { id: shortSessionId(item.id) })
+                        : item.title}
+                    </span>
+                    <span style={styles.rowSnippet}>
+                      {item.status === 'missing' ? t('row.missingSnippet') : item.snippet}
+                    </span>
                   </div>
                   <span style={styles.meta}>
                     {item.workspaceTitle ?? item.cwd ?? '—'}
@@ -818,7 +846,9 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
                         ? t('status.missing')
                         : formatTime(item.updatedAt)}
                   </span>
-                  <span style={styles.meta}>{formatBytes(item.sizeBytes)}</span>
+                  <span style={styles.meta}>
+                    {item.status === 'missing' ? '—' : formatBytes(item.sizeBytes)}
+                  </span>
                 </div>
               ))
             )}

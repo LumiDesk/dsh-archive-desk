@@ -118,15 +118,25 @@ export class ArchiveDeskService {
         const filtered = request.query === undefined
             ? items
             : items.filter((item) => matchesQuery(item, request.query ?? ''));
-        filtered.sort((left, right) => right.updatedAt - left.updatedAt);
+        // Dangling references sort last: a row with no log has nothing to preview
+        // and would otherwise push real conversations down the list.
+        filtered.sort((left, right) => {
+            const leftMissing = left.status === 'missing' ? 1 : 0;
+            const rightMissing = right.status === 'missing' ? 1 : 0;
+            if (leftMissing !== rightMissing)
+                return leftMissing - rightMissing;
+            return right.updatedAt - left.updatedAt;
+        });
         const limit = clamp(request.limit ?? DEFAULT_LIMIT, 1, MAX_LIMIT);
         const offset = Math.max(0, Math.trunc(request.offset ?? 0));
         const totalBytes = filtered.reduce((sum, item) => sum + item.sizeBytes, 0);
+        const missing = filtered.filter((item) => item.status === 'missing').length;
         return {
             total: filtered.length,
             offset,
             limit,
             totalBytes,
+            missing,
             matchingIds: filtered.slice(0, MAX_MATCHING_IDS).map((item) => item.id),
             items: filtered.slice(offset, offset + limit),
         };

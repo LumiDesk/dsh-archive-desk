@@ -261,6 +261,10 @@ var __dshArchiveDesk = (() => {
     "notice.restored": "\u5DF2\u6062\u590D {count} \u4E2A\u4F1A\u8BDD",
     "notice.purged": "\u5DF2\u5F7B\u5E95\u5220\u9664 {count} \u4E2A\u6761\u76EE\uFF0C\u91CA\u653E {size}",
     "notice.dangling": "\u5DF2\u6E05\u7406 {count} \u6761\u5931\u6548\u5F15\u7528",
+    "action.cleanDangling": "\u6E05\u7406\u5931\u6548\u5F15\u7528\uFF08{count}\uFF09",
+    "hint.missing": "\u5176\u4E2D {count} \u6761\u5F15\u7528\u6307\u5411\u7684\u4F1A\u8BDD\u65E5\u5FD7\u5DF2\u4E0D\u5728\u78C1\u76D8\u4E0A\uFF08\u53EF\u80FD\u662F\u65E9\u524D\u7684\u624B\u5DE5\u6E05\u7406\u7559\u4E0B\u7684\u60AC\u7A7A\u5F15\u7528\uFF09\uFF0C\u53EF\u4EE5\u4E00\u952E\u6E05\u7406\u3002",
+    "row.missingTitle": "\u5DF2\u5931\u6548\u4F1A\u8BDD \xB7 {id}",
+    "row.missingSnippet": "\u4F1A\u8BDD\u65E5\u5FD7\u5DF2\u4E0D\u5728\u78C1\u76D8\u4E0A\uFF0C\u53EA\u5269\u5F52\u6863\u5F15\u7528",
     "notice.keep": "\u5DF2\u8DF3\u8FC7 {count} \u4E2A\u65E0\u6CD5\u5220\u9664\u7684\u4F1A\u8BDD",
     "confirm.deleteTitle": "\u5220\u9664 {count} \u4E2A\u5F52\u6863\u5BF9\u8BDD\uFF1F",
     "confirm.emptyTitle": "\u6E05\u7A7A\u56DE\u6536\u7AD9\uFF1F",
@@ -299,6 +303,10 @@ var __dshArchiveDesk = (() => {
     "notice.restored": "Restored {count} conversations",
     "notice.purged": "Permanently deleted {count} entries, freed {size}",
     "notice.dangling": "Dropped {count} dangling references",
+    "action.cleanDangling": "Clean up {count} dangling",
+    "hint.missing": "{count} references point at sessions whose logs are gone (left behind by an earlier manual cleanup). They can be removed in one go.",
+    "row.missingTitle": "Missing session \xB7 {id}",
+    "row.missingSnippet": "The session log is gone; only the archive reference remains",
     "notice.keep": "Skipped {count} conversations that could not be deleted",
     "confirm.deleteTitle": "Delete {count} archived conversations?",
     "confirm.emptyTitle": "Empty the recycle bin?",
@@ -319,6 +327,9 @@ var __dshArchiveDesk = (() => {
     if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
     return `${bytes} B`;
+  }
+  function shortSessionId(id) {
+    return id.startsWith("session-") ? id.slice("session-".length, "session-".length + 8) : id.slice(0, 8);
   }
   function formatTime(value) {
     const date = typeof value === "string" ? new Date(value) : new Date(value);
@@ -460,6 +471,7 @@ var __dshArchiveDesk = (() => {
       offset: 0,
       limit: PAGE_SIZE,
       totalBytes: 0,
+      missing: 0,
       matchingIds: [],
       items: []
     });
@@ -592,7 +604,7 @@ var __dshArchiveDesk = (() => {
         return t("notice.dangling", { count: result.removed.length });
       });
     };
-    const missing = list.items.filter((item) => item.status === "missing").length;
+    const missing = list.missing;
     const totalPages = Math.max(1, Math.ceil(list.total / PAGE_SIZE));
     const selectedBytes = list.items.filter((item) => selectedSet.has(item.id)).reduce((sum, item) => sum + item.sizeBytes, 0);
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.root, children: [
@@ -623,6 +635,7 @@ var __dshArchiveDesk = (() => {
       error !== null && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.banner("error"), children: error }),
       notice !== null && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.banner("info"), children: notice }),
       tab === "archived" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        missing > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.banner("info"), children: t("hint.missing", { count: missing }) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.toolbar, children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
             "input",
@@ -638,7 +651,7 @@ var __dshArchiveDesk = (() => {
             t("action.selectAll")
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.meta, children: t("selection.count", { count: selected.length }) }),
-          missing > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: styles.button, onClick: cleanDangling, disabled: busy, children: t("notice.dangling", { count: missing }) }),
+          missing > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", style: styles.button, onClick: cleanDangling, disabled: busy, children: t("action.cleanDangling", { count: missing }) }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 6, fontSize: 13 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
               "input",
@@ -684,15 +697,15 @@ var __dshArchiveDesk = (() => {
             }
           ),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { minWidth: 0 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.rowTitle, children: item.title }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.rowSnippet, children: item.snippet })
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.rowTitle, children: item.status === "missing" ? t("row.missingTitle", { id: shortSessionId(item.id) }) : item.title }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.rowSnippet, children: item.status === "missing" ? t("row.missingSnippet") : item.snippet })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { style: styles.meta, children: [
             item.workspaceTitle ?? item.cwd ?? "\u2014",
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
             item.status === "live" ? t("status.live") : item.status === "missing" ? t("status.missing") : formatTime(item.updatedAt)
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.meta, children: formatBytes(item.sizeBytes) })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.meta, children: item.status === "missing" ? "\u2014" : formatBytes(item.sizeBytes) })
         ] }, item.id)) }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.footer, children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: t("page.indicator", { page: page + 1, total: totalPages }) }),
