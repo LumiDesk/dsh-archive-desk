@@ -47,34 +47,38 @@ export function toolDefinition(createService, ctx) {
     return {
         name: TOOL_NAME,
         description: TOOL_DESCRIPTION,
-        // `parameters` is the compact property map the harness compiles into a
-        // JSON Schema (`{name: {type, required?, ...}}`), NOT a JSON Schema object.
-        // Wrapping it in `{type:'object', properties:{...}}` produces a malformed
-        // function schema and every model request fails with
-        // `Invalid schema for function ...`.
+        // `register()` takes the COMPILED definition: `parameters` must be a real
+        // JSON Schema (top-level `type`, a `required` array, and no property-level
+        // `required: true`). Two earlier shapes broke every model request:
+        //   1. property-level `required: true`  → `true is not of type "array"`
+        //   2. a bare property map              → `got "type: null"`
         parameters: {
-            action: {
-                type: 'string',
-                required: true,
-                enum: ['list', 'delete', 'restore', 'trash'],
-                description: 'Operation to perform.',
-            },
-            ids: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Archived session ids for `delete`. Maximum 100.',
-            },
-            trashIds: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Recycle-bin entry ids for `restore`.',
-            },
-            query: { type: 'string', description: 'Filter for `list`.' },
-            offset: { type: 'integer', description: 'Page offset for `list` (default 0).' },
-            limit: { type: 'integer', description: 'Page size for `list` (default 20, max 100).' },
-            confirm: {
-                type: 'boolean',
-                description: 'Must be true to perform `delete`. Deletion moves sessions to the bin.',
+            type: 'object',
+            additionalProperties: false,
+            required: ['action'],
+            properties: {
+                action: {
+                    type: 'string',
+                    enum: ['list', 'delete', 'restore', 'trash'],
+                    description: 'Operation to perform.',
+                },
+                ids: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Archived session ids for `delete`. Maximum 100.',
+                },
+                trashIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Recycle-bin entry ids for `restore`.',
+                },
+                query: { type: 'string', description: 'Filter for `list`.' },
+                offset: { type: 'integer', description: 'Page offset for `list` (default 0).' },
+                limit: { type: 'integer', description: 'Page size for `list` (default 20, max 100).' },
+                confirm: {
+                    type: 'boolean',
+                    description: 'Must be true to perform `delete`. Deletion moves sessions to the bin.',
+                },
             },
         },
         output: {

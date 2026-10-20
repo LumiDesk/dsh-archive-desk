@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import type { Context } from '@deepseek-ai/cordis'
+import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 
 import type { ArchiveDeskService } from '../src/host/service.ts'
 import { toolDefinition } from '../src/host/tool.ts'
@@ -114,28 +115,30 @@ test('unknown actions are rejected, and rendering is plain text', async () => {
   assert.match(blocks[0]?.text ?? '', /"ok": true/)
 })
 
-test('parameters stay a compact property map, never a wrapped JSON schema', () => {
-  // The harness compiles this map into a JSON Schema. Passing a schema object
-  // once produced `Invalid schema for function ...: true is not of type
-  // "array"` and broke every model request.
+test('tool schemas pass the harness JSON Schema validator', () => {
+  // Two earlier shapes broke every model request:
+  //   - property-level `required: true` → `true is not of type "array"`
+  //   - a bare property map           → `got "type: null"`
+  // `assertSupportedJsonSchema` is the harness's own gate, so passing it here
+  // means the wire schema is accepted before it ever reaches a provider.
   const { tool } = definition()
-  const parameters = (tool as unknown as { parameters: Record<string, unknown> }).parameters
+  const definitionShape = tool as unknown as {
+    parameters: {
+      type: string
+      required: string[]
+      properties: Record<string, { type: string; items?: unknown; required?: unknown }>
+    }
+    output: { schema: unknown }
+  }
 
-  assert.equal('type' in parameters, false)
-  assert.equal('properties' in parameters, false)
-  assert.deepEqual(Object.keys(parameters).sort(), [
-    'action',
-    'confirm',
-    'ids',
-    'limit',
-    'offset',
-    'query',
-    'trashIds',
-  ])
-  for (const value of Object.values(parameters)) {
-    const spec = value as { type?: unknown; items?: unknown }
+  assertSupportedJsonSchema(definitionShape.parameters as never)
+  assertSupportedJsonSchema(definitionShape.output.schema as never)
+
+  assert.equal(definitionShape.parameters.type, 'object')
+  assert.deepEqual(definitionShape.parameters.required, ['action'])
+  for (const spec of Object.values(definitionShape.parameters.properties)) {
     assert.equal(typeof spec.type, 'string')
+    assert.equal('required' in spec, false)
     if (spec.type === 'array') assert.equal(typeof spec.items, 'object')
   }
-  assert.equal((parameters.action as { required?: boolean }).required, true)
 })

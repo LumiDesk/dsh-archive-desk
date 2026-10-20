@@ -58,7 +58,32 @@ docs/设计.md          设计与决策的唯一来源
 运行时基准是 **DSH 0.2.1-rc.2**。`@deepseek-ai/*` 的 npm `latest` 标签指向旧的
 `0.0.1-rc.1`，安装类型包时必须显式写版本号，否则拿到的是过期类型。
 
-## 6. 边界
+## 6. 工具 schema 的坑（踩过两次，把整个 Agent 锁死过）
+
+`ctx.tools.register()` 收的是 **编译后的 JSON Schema**，不是 `defineTool` 那种属性表：
+
+```ts
+parameters: {
+  type: 'object',
+  additionalProperties: false,
+  required: ['action'],          // 必须是数组，放在顶层
+  properties: {
+    action: { type: 'string', enum: [...] },   // 属性里不能出现 required: true
+  },
+}
+```
+
+两种错误写法都会让**每一次**模型请求被服务端拒绝：
+
+| 写法                      | 报错                                                              |
+| ------------------------- | ----------------------------------------------------------------- |
+| 属性级 `required: true`   | `true is not of type "array"`                                     |
+| 直接给属性表（无 `type`） | `schema must be a JSON Schema of type "object", got "type: null"` |
+
+改完 schema 必须跑 `test/tool.test.ts`：它用宿主自己的 `assertSupportedJsonSchema`
+（devDependency `@deepseek-ai/dsh-tools`）校验参数与输出 schema，这一步通过才算安全。
+
+## 7. 边界
 
 - 不清理 `~/.dsh/attachments`（内容寻址、跨会话共享）。
 - 只操作归档集合内的会话；运行中的会话一律跳过。
