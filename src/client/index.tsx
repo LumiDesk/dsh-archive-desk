@@ -230,7 +230,9 @@ const styles = {
     fontSize: 13,
   }),
   banner: (tone: 'error' | 'info'): CSSProperties => ({
-    margin: '0 32px 12px',
+    // The hint banner sits directly under the tab row; without top spacing it
+    // reads as part of the tabs.
+    margin: '12px 32px',
     padding: '8px 12px',
     borderRadius: 8,
     fontSize: 13,
@@ -252,11 +254,49 @@ const styles = {
     maxWidth: 'calc(100vw - 48px)',
     padding: 20,
     borderRadius: 14,
-    background: colors.overlay,
-    border: `1px solid ${colors.border}`,
-    boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+    // The confirm dialog is deliberately a fixed dark surface: it must read as
+    // a modal over both light and dark panels, and the theme's "overlay" token
+    // resolves to a light gray that left the light text illegible.
+    background: '#2c2c2e',
+    color: '#f5f5f5',
+    border: '1px solid rgba(255,255,255,0.12)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
   } as CSSProperties,
-  dialogTitle: { margin: '0 0 12px', fontSize: 16, fontWeight: 600 } as CSSProperties,
+  dialogTitle: {
+    margin: '0 0 12px',
+    fontSize: 16,
+    fontWeight: 600,
+    color: '#f5f5f5',
+  } as CSSProperties,
+  dialogText: { margin: '0 0 12px', fontSize: 13, color: '#c7c7cc' } as CSSProperties,
+  dialogMeta: { fontSize: 13, color: '#c7c7cc' } as CSSProperties,
+  dialogButton: {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(255,255,255,0.08)',
+    color: '#f5f5f5',
+    cursor: 'pointer',
+    fontSize: 13,
+  } as CSSProperties,
+  dialogDanger: {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: '1px solid #f25a5a',
+    background: 'transparent',
+    color: '#ff9b9b',
+    cursor: 'pointer',
+    fontSize: 13,
+  } as CSSProperties,
+  dialogPrimary: {
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: '1px solid #3964fe',
+    background: '#3964fe',
+    color: '#ffffff',
+    cursor: 'pointer',
+    fontSize: 13,
+  } as CSSProperties,
   dialogList: {
     maxHeight: 180,
     overflowY: 'auto',
@@ -264,7 +304,7 @@ const styles = {
     padding: 0,
     listStyle: 'none',
     fontSize: 13,
-    color: colors.secondary,
+    color: '#c7c7cc',
   } as CSSProperties,
   dialogRow: {
     display: 'flex',
@@ -489,7 +529,7 @@ function ConfirmDialog(props: {
     <div style={styles.overlay} role="dialog" aria-modal="true" aria-label={title}>
       <div style={styles.dialog}>
         <h3 style={styles.dialogTitle}>{title}</h3>
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: colors.secondary }}>{body}</p>
+        <p style={styles.dialogText}>{body}</p>
 
         {labels.length > 0 && (
           <ul style={styles.dialogList}>
@@ -506,9 +546,7 @@ function ConfirmDialog(props: {
           </ul>
         )}
 
-        <div style={{ fontSize: 13, color: colors.secondary }}>
-          {t('confirm.release', { size: formatBytes(bytes) })}
-        </div>
+        <div style={styles.dialogMeta}>{t('confirm.release', { size: formatBytes(bytes) })}</div>
 
         {pending.kind === 'delete' && (
           <div style={{ marginTop: 12 }}>
@@ -534,7 +572,7 @@ function ConfirmDialog(props: {
         )}
 
         {needsAck && (
-          <label style={{ ...styles.choice, marginTop: 8, color: colors.danger }}>
+          <label style={{ ...styles.choice, marginTop: 8, color: '#ff9b9b' }}>
             <input
               type="checkbox"
               checked={acknowledged}
@@ -546,11 +584,11 @@ function ConfirmDialog(props: {
         )}
 
         <div style={styles.actions}>
-          <button style={styles.button} onClick={onCancel} disabled={busy} type="button">
+          <button style={styles.dialogButton} onClick={onCancel} disabled={busy} type="button">
             {t('action.cancel')}
           </button>
           <button
-            style={needsAck ? styles.dangerButton : styles.primaryButton}
+            style={needsAck ? styles.dialogDanger : styles.dialogPrimary}
             onClick={onConfirm}
             disabled={busy || (needsAck && !acknowledged)}
             type="button"

@@ -182,7 +182,9 @@ var __dshArchiveDesk = (() => {
       fontSize: 13
     }),
     banner: (tone) => ({
-      margin: "0 32px 12px",
+      // The hint banner sits directly under the tab row; without top spacing it
+      // reads as part of the tabs.
+      margin: "12px 32px",
       padding: "8px 12px",
       borderRadius: 8,
       fontSize: 13,
@@ -204,11 +206,49 @@ var __dshArchiveDesk = (() => {
       maxWidth: "calc(100vw - 48px)",
       padding: 20,
       borderRadius: 14,
-      background: colors.overlay,
-      border: `1px solid ${colors.border}`,
-      boxShadow: "0 20px 60px rgba(0,0,0,0.25)"
+      // The confirm dialog is deliberately a fixed dark surface: it must read as
+      // a modal over both light and dark panels, and the theme's "overlay" token
+      // resolves to a light gray that left the light text illegible.
+      background: "#2c2c2e",
+      color: "#f5f5f5",
+      border: "1px solid rgba(255,255,255,0.12)",
+      boxShadow: "0 20px 60px rgba(0,0,0,0.35)"
     },
-    dialogTitle: { margin: "0 0 12px", fontSize: 16, fontWeight: 600 },
+    dialogTitle: {
+      margin: "0 0 12px",
+      fontSize: 16,
+      fontWeight: 600,
+      color: "#f5f5f5"
+    },
+    dialogText: { margin: "0 0 12px", fontSize: 13, color: "#c7c7cc" },
+    dialogMeta: { fontSize: 13, color: "#c7c7cc" },
+    dialogButton: {
+      padding: "6px 12px",
+      borderRadius: 8,
+      border: "1px solid rgba(255,255,255,0.18)",
+      background: "rgba(255,255,255,0.08)",
+      color: "#f5f5f5",
+      cursor: "pointer",
+      fontSize: 13
+    },
+    dialogDanger: {
+      padding: "6px 12px",
+      borderRadius: 8,
+      border: "1px solid #f25a5a",
+      background: "transparent",
+      color: "#ff9b9b",
+      cursor: "pointer",
+      fontSize: 13
+    },
+    dialogPrimary: {
+      padding: "6px 12px",
+      borderRadius: 8,
+      border: "1px solid #3964fe",
+      background: "#3964fe",
+      color: "#ffffff",
+      cursor: "pointer",
+      fontSize: 13
+    },
     dialogList: {
       maxHeight: 180,
       overflowY: "auto",
@@ -216,7 +256,7 @@ var __dshArchiveDesk = (() => {
       padding: 0,
       listStyle: "none",
       fontSize: 13,
-      color: colors.secondary
+      color: "#c7c7cc"
     },
     dialogRow: {
       display: "flex",
@@ -393,7 +433,7 @@ var __dshArchiveDesk = (() => {
     const labels = pending.kind === "delete" ? pending.labels : pending.kind === "purgeOne" ? [pending.label] : [];
     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.overlay, role: "dialog", "aria-modal": "true", "aria-label": title, children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.dialog, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { style: styles.dialogTitle, children: title }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: { margin: "0 0 12px", fontSize: 13, color: colors.secondary }, children: body }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { style: styles.dialogText, children: body }),
       labels.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ul", { style: styles.dialogList, children: [
         labels.slice(0, 6).map((label, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("li", { style: styles.dialogRow, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "span",
@@ -407,7 +447,7 @@ var __dshArchiveDesk = (() => {
           labels.length - 6
         ] })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { fontSize: 13, color: colors.secondary }, children: t("confirm.release", { size: formatBytes(bytes) }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.dialogMeta, children: t("confirm.release", { size: formatBytes(bytes) }) }),
       pending.kind === "delete" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { marginTop: 12 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { style: styles.choice, children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -434,7 +474,7 @@ var __dshArchiveDesk = (() => {
           t("action.purge")
         ] })
       ] }),
-      needsAck && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { style: { ...styles.choice, marginTop: 8, color: colors.danger }, children: [
+      needsAck && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { style: { ...styles.choice, marginTop: 8, color: "#ff9b9b" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "input",
           {
@@ -447,11 +487,11 @@ var __dshArchiveDesk = (() => {
         t("confirm.ack")
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.actions, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { style: styles.button, onClick: onCancel, disabled: busy, type: "button", children: t("action.cancel") }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { style: styles.dialogButton, onClick: onCancel, disabled: busy, type: "button", children: t("action.cancel") }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
           "button",
           {
-            style: needsAck ? styles.dangerButton : styles.primaryButton,
+            style: needsAck ? styles.dialogDanger : styles.dialogPrimary,
             onClick: onConfirm,
             disabled: busy || needsAck && !acknowledged,
             type: "button",
