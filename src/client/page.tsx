@@ -87,7 +87,9 @@ function StatusBadge({ item, t }: { item: ArchivedItem; t: Translate }) {
   if (item.status === 'missing') {
     return (
       <Tooltip label={t('status.tooltip.missing')} side="bottom">
-        <Tag tone="danger">{t('status.missing')}</Tag>
+        <span className="adk-status" data-status="missing">
+          <Tag tone="danger">{t('status.missing')}</Tag>
+        </span>
       </Tooltip>
     )
   }
@@ -1056,7 +1058,9 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
                         <span className="adk-cell-status">
                           {corrupt ? (
                             <Tooltip label={t('status.tooltip.corrupt')} side="bottom">
-                              <Tag tone="danger">{t('status.corrupt')}</Tag>
+                              <span className="adk-status" data-status="missing">
+                                <Tag tone="danger">{t('status.corrupt')}</Tag>
+                              </span>
                             </Tooltip>
                           ) : (
                             <Tag tone="info">{t('status.ok')}</Tag>
