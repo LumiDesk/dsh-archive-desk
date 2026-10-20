@@ -432,12 +432,14 @@ export class ArchiveDeskService {
 
     for (const trashId of trashIds) {
       let meta: TrashMeta | undefined
+      let attached: WorkspaceLike | undefined
       try {
         meta = await this.trash().restore(trashId)
         const workspace = this.workspaces().find((candidate) => samePath(candidate.path, meta?.cwd))
         if (workspace !== undefined) {
           try {
             await workspace.attachSession?.(meta.sessionId)
+            attached = workspace
           } catch {
             // A missing cwd or a removed workspace leaves the session ungrouped.
           }
@@ -454,6 +456,13 @@ export class ArchiveDeskService {
         result.restored.push(trashId)
       } catch (error) {
         if (meta !== undefined) {
+          if (attached !== undefined) {
+            try {
+              await attached.detachSession?.(meta.sessionId)
+            } catch {
+              // The stale workspace slot is pruned on its next write.
+            }
+          }
           try {
             await this.trash().rollback(trashId, meta)
           } catch {
@@ -621,6 +630,7 @@ export class ArchiveDeskService {
     location: SessionLocation | undefined,
     workspaces: readonly WorkspaceLike[],
   ): Promise<ArchivedItem> {
+    await this.ensureCache()
     const workspace = workspaces.find((candidate) => candidate.sessionIds?.includes(id) === true)
     const workspaceId = workspace?.id
     const workspaceTitle = workspace?.title

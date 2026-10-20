@@ -199,7 +199,7 @@ test('restore puts the session back and re-archives it', async (t) => {
 })
 
 test('a failed re-archive rolls the payload back into the bin', async (t) => {
-  const { home, sessionDir, service } = await fixture({ failArchive: true })
+  const { home, sessionDir, workspace, service } = await fixture({ failArchive: true })
   t.after(() => rm(home, { recursive: true, force: true }))
 
   await service.delete({ ids: [PRESENT], mode: 'trash' })
@@ -211,6 +211,7 @@ test('a failed re-archive rolls the payload back into the bin', async (t) => {
   assert.equal(result.restored.length, 0)
   assert.equal(result.failed[0]?.trashId, entry.trashId)
   assert.equal(await exists(sessionDir), false)
+  assert.deepEqual(workspace.sessionIds, [])
   const remaining = await service.listTrash()
   assert.equal(remaining.items.length, 1)
   assert.equal(remaining.items[0]?.status, 'ready')

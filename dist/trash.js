@@ -134,7 +134,13 @@ export class TrashStore {
                 detachedFromWorkspace: input.detachedFromWorkspace,
                 wasArchived: input.wasArchived,
             };
-            await writeMeta(entryDir, meta);
+            try {
+                await writeMeta(entryDir, meta);
+            }
+            catch (error) {
+                await rm(entryDir, { recursive: true, force: true });
+                throw error;
+            }
             try {
                 await rename(originalPath, payloadDir);
             }
