@@ -89,23 +89,28 @@ export function apply(ctx) {
         void recordBoot(home, {
             at: new Date().toISOString(),
             stage,
-            plugin: name,
             pid: process.pid,
             services: probeCapabilities(ctx),
             ...(error === undefined ? {} : { error }),
         });
     };
     boot('apply-start');
-    ctx.inject(['webServer'], (webCtx) => {
+    // Both services are injected: the route needs the server, the handler needs
+    // the trust check, and `webServer` alone can activate while `connection` is
+    // still booting. Waiting for both removes that ordering window.
+    ctx.inject(['webServer', 'connection'], (webCtx) => {
         boot('injected');
-        const webServer = webCtx.get('webServer');
-        const connection = webCtx.get('connection');
-        if (webServer === undefined) {
-            boot('bind-error', 'webServer service is not readable');
-            return;
+        let webServer;
+        let connection;
+        try {
+            // The injected context resolves services as properties; the local
+            // interface keeps that contract without the upstream service types.
+            const deps = webCtx;
+            webServer = deps.webServer;
+            connection = deps.connection;
         }
-        if (connection === undefined) {
-            boot('bind-error', 'connection service is not readable');
+        catch (error) {
+            boot('bind-error', error instanceof Error ? error.message : String(error));
             return;
         }
         try {
