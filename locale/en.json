@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "title": "Archive Desk",
+    "description": "Manage archived conversations: preview, restore, recycle, or delete them for good, with batch actions and an Agent-callable tool."
+  },
+  "panel": "Archive Desk",
+  "page.title": "Archive Desk",
+  "page.summary": "{count} archived conversations · {size}",
+  "tab.archived": "Archived",
+  "tab.trash": "Recycle bin",
+  "search.placeholder": "Search title, preview, or project",
+  "action.selectAll": "Select all",
+  "action.delete": "Delete selected",
+  "action.restore": "Restore",
+  "action.purge": "Delete permanently",
+  "action.emptyTrash": "Empty recycle bin",
+  "toggle.trash": "Move to recycle bin",
+  "empty.archived": "No archived conversations yet.",
+  "empty.trash": "The recycle bin is empty."
+}

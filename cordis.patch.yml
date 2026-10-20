@@ -1,0 +1,11 @@
+# Bundle patch for dsh-archive-desk.
+#
+# One Host row is enough: the Client half is discovered from `dsh.client` in
+# package.json and loaded by the Web plugin table, not by a second row.
+#
+# `id` is the Loader entry id and is also what the Plugin Manager lists; keep it
+# stable across releases so user patches can target it.
+- insert:
+    - id: archive-desk
+      name: dsh-archive-desk
+      config: {}

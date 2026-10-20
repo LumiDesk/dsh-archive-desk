@@ -1,0 +1,7 @@
+# pnpm 11 reads its settings from this file rather than package.json.
+# esbuild ships a platform binary through an install script; allow that script
+# so `pnpm install` exits cleanly instead of reporting an ignored build.
+packages:
+  - .
+allowBuilds:
+  esbuild: true
