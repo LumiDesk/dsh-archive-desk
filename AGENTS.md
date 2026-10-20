@@ -7,7 +7,7 @@
 `dsh-archive-desk`（归档工作台）是 DeepSeek Harness（DSH）的一个插件：补上「归档」之后缺失的
 查看、恢复、回收站、彻底删除能力，并把同一套能力暴露给 Agent。
 
-当前版本 **0.3.0**：Host 用 `workspace/session-activity` 区分「运行中」与「已加载但空闲」，
+当前版本 **1.0.0**：Host 用 `workspace/session-activity` 区分「运行中」与「已加载但空闲」，
 列表走路径索引 + 摘要缓存；Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目，
 并支持行内/批量的「取消归档」；插件**没有配置项**。
 
@@ -81,6 +81,29 @@ docs/设计.md             设计与决策的唯一来源
    的 `config`。安全边界用常量固定；每页条数/排序只是页面可见控件，不持久化。
 9. **UI primitives 保持 external。** `@deepseek-ai/dsh-client-ui-primitives` 从页面模块表取，
    在 `dsh.client.external` 声明、esbuild external；不要把第二份 React/组件打进 `dist/client.js`。
+
+### 4.1 本机开发/验收循环（desktop profile）
+
+这个仓库的日常节奏是「npm 版」与「link 开发版」交替。每一步安装/卸载仍然要先得到用户
+的明确要求，不要自行改 profile。
+
+1. **开发前卸载 npm 版**：
+   ```powershell
+   dsh plugin --profile desktop remove dsh-archive-desk
+   ```
+   如果 `node_modules\dsh-archive-desk` 还残留 symlink，只删除这个链接，不要碰仓库目录。
+2. **开发并构建**：
+   ```powershell
+   pnpm build
+   ```
+3. **安装 link 开发版**：
+   ```powershell
+   dsh plugin --profile desktop add <仓库绝对路径>
+   ```
+4. **重启 DSH** 加载 Host 侧改动；纯 Client 改动通常刷新页面即可。
+5. **用户验收**。通过后由用户自己执行 `pnpm release ...` 发布；Agent 不代为发布。
+6. **发布后切回 npm 版**：先移除 link 开发版，再安装
+   `dsh plugin --profile desktop add dsh-archive-desk@<新版本>`。
 
 ## 5. 版本对齐
 

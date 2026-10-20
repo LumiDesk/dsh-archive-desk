@@ -166,7 +166,7 @@ pnpm format
 ### 发版
 
 ```bash
-pnpm release patch          # 0.3.0 → 0.3.1（minor / major / 显式版本号同理）
+pnpm release patch          # 1.0.0 → 1.0.1（minor / major / 显式版本号同理）
 pnpm release minor --dry-run
 ```
 
