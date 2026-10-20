@@ -8,8 +8,8 @@
 查看、恢复、回收站、彻底删除能力，并把同一套能力暴露给 Agent。
 
 当前版本 **0.3.0**：Host 用 `workspace/session-activity` 区分「运行中」与「已加载但空闲」，
-列表走路径索引 + 摘要缓存；Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目；
-插件**没有配置项**。
+列表走路径索引 + 摘要缓存；Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目，
+并支持行内/批量的「取消归档」；插件**没有配置项**。
 
 设计与取舍**只有一个出处**：[docs/设计.md](docs/设计.md)。改行为之前先改它。
 
@@ -21,7 +21,7 @@
 | Host   | `tsc` → `dist/index.js`（ESM，Node 22+）                                                                                 |
 | Client | `esbuild` → `dist/client.js`（IIFE 包进 `__ModuleLoader__` 工厂，minify）                                                |
 | UI     | `@deepseek-ai/dsh-client-ui-primitives` 作为 external 从页面模块表取，不打包                                             |
-| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖，目前 47 个用例                                                    |
+| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖，目前 49 个用例                                                    |
 | 规范   | Prettier（无分号、单引号、100 列）、ESLint（typescript-eslint）、Commitlint（Conventional Commits）、Husky + lint-staged |
 
 ```bash
@@ -38,7 +38,7 @@ pnpm release patch    # 发版：校验 → 升版本 → 打 tag → npm publis
 
 ```
 src/host/index.ts        Host 入口：HTTP 路由、能力探测、工具注册、启动诊断
-src/host/service.ts      业务：列表 / 删除事务 / 恢复 / 清空 / 清理失效引用
+src/host/service.ts      业务：列表 / 取消归档 / 删除事务 / 恢复 / 清空 / 清理失效引用
 src/host/paths.ts        路径解析、id 校验、体积/指纹、跨卷与 symlink 保护
 src/host/cache.ts        列表摘要缓存（~/.dsh/archive-desk/summaries.json）
 src/host/trash.ts        回收站存储（两阶段写入 + 恢复事务 + 损坏条目）

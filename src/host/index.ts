@@ -30,6 +30,7 @@ import {
   type RestoreRequest,
   type SessionQueryLike,
   type TrashListRequest,
+  type UnarchiveRequest,
   type WorkspaceRegistryLike,
 } from './service.ts'
 import { toolDefinition } from './tool.ts'
@@ -229,6 +230,8 @@ export async function dispatch(ctx: Context, endpoint: string, payload: unknown)
       return service.list((payload ?? {}) as ListRequest)
     case 'inspect':
       return service.inspect((payload ?? {}) as InspectRequest)
+    case 'unarchive':
+      return service.unarchive((payload ?? {}) as UnarchiveRequest)
     case 'listTrash':
       return service.listTrash((payload ?? {}) as TrashListRequest)
     case 'delete':

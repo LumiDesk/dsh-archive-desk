@@ -7,6 +7,7 @@ test('endpointOf accepts one segment under the route', () => {
   assert.equal(endpointOf('/archive-desk/status'), 'status')
   assert.equal(endpointOf('/archive-desk/list'), 'list')
   assert.equal(endpointOf('/archive-desk/inspect'), 'inspect')
+  assert.equal(endpointOf('/archive-desk/unarchive'), 'unarchive')
   assert.equal(endpointOf('/archive-desk/listTrash'), 'listTrash')
   assert.equal(endpointOf('/archive-desk/status?x=1'), 'status')
 })

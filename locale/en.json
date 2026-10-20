@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Archive Desk",
-    "description": "Manage archived conversations: status, search, restore, recycle, or delete them for good, with batch actions and an Agent-callable tool."
+    "description": "Manage archived conversations: status, search, unarchive, restore, recycle, or delete them for good, with batch actions and an Agent-callable tool."
   },
   "panel": "Archive Desk"
 }

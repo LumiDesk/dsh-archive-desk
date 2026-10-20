@@ -89,6 +89,15 @@ export interface InspectResult {
   notArchived: string[]
 }
 
+export interface UnarchiveRequest {
+  ids?: unknown
+}
+
+export interface UnarchiveResult {
+  unarchived: string[]
+  skipped: Array<{ id: string; reason: string }>
+}
+
 export interface DeleteRequest {
   ids?: unknown
   mode?: unknown
@@ -373,6 +382,51 @@ export class ArchiveDeskService {
       missing,
       notArchived,
     }
+  }
+
+  /**
+   * Take sessions out of the archive set without touching their files.
+   *
+   * The registry update is the whole operation: the workspace controller
+   * watches the domain and pushes the new archive set to every connected
+   * client, so the sidebar row returns to its workspace. Missing directories
+   * are skipped — a dangling reference should be cleaned up, not unarchived
+   * into an invisible half-session.
+   */
+  async unarchive(request: UnarchiveRequest): Promise<UnarchiveResult> {
+    const registry = this.requireRegistry()
+    const ids = uniqueStrings(request.ids).filter(isSessionId)
+    const archived = new Set(this.archivedIds())
+    const root = sessionsRoot(this.deps.home)
+    const result: UnarchiveResult = { unarchived: [], skipped: [] }
+
+    for (const id of ids) {
+      if (!archived.has(id)) {
+        result.skipped.push({ id, reason: 'archive/not-archived' })
+        continue
+      }
+      let location: SessionLocation | undefined
+      try {
+        location = await locateSession(root, id)
+      } catch (error) {
+        result.skipped.push({ id, reason: reasonOf(error) })
+        continue
+      }
+      if (location === undefined) {
+        result.skipped.push({ id, reason: 'archive/not-found' })
+        continue
+      }
+      try {
+        await registry.unarchiveSession(id)
+        this.summaryCache.delete(id)
+        result.unarchived.push(id)
+      } catch (error) {
+        result.skipped.push({ id, reason: reasonOf(error) })
+      }
+    }
+
+    await this.summaryCache.flush()
+    return result
   }
 
   /**

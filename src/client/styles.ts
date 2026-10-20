@@ -178,7 +178,7 @@ export const STYLES = `
 .adk-table-head,
 .adk-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 150px 104px 78px 86px 30px;
+  grid-template-columns: 26px minmax(0, 1fr) 150px 104px 78px 86px 64px;
   gap: 12px;
   align-items: center;
 }
@@ -515,7 +515,7 @@ export const STYLES = `
   .adk-table { padding: 0 20px; }
   .adk-footer { padding: 12px 20px 18px; }
   .adk-table-head,
-  .adk-row { grid-template-columns: 26px minmax(0, 1fr) 96px 78px 30px; }
+  .adk-row { grid-template-columns: 26px minmax(0, 1fr) 96px 78px 64px; }
   .adk-cell-project,
   .adk-cell-time,
   .adk-trash-head .adk-cell-project,
@@ -531,7 +531,7 @@ export const STYLES = `
   .adk-search { max-width: none; flex-basis: 100%; }
   .adk-toolbar-actions { width: 100%; justify-content: flex-end; }
   .adk-table-head,
-  .adk-row { grid-template-columns: 26px minmax(0, 1fr) 78px 30px; }
+  .adk-row { grid-template-columns: 26px minmax(0, 1fr) 78px 64px; }
   .adk-cell-status,
   .adk-trash-head .adk-cell-status,
   .adk-trash-row .adk-cell-status { display: none; }

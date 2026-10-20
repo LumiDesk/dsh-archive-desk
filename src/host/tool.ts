@@ -18,11 +18,12 @@ const TOOL_NAME = 'archived_conversations'
 const MAX_IDS = 100
 
 const TOOL_DESCRIPTION = [
-  'List, delete (into the recycle bin) or restore archived DeepSeek Harness conversations.',
-  'Actions: list (newest first, with title/preview/size and running/open state), delete (archived',
-  'ids -> recycle bin; requires confirm:true), restore (recycle-bin trashIds back to the archive),',
-  'trash (page through the bin). Permanent deletion is not available through this tool; ask the',
-  'user to use the Archive Desk panel.',
+  'List, unarchive, delete (into the recycle bin) or restore archived DeepSeek Harness',
+  'conversations. Actions: list (newest first, with title/preview/size and running/open state),',
+  'unarchive (archived ids -> the normal workspace, files untouched), delete (archived ids ->',
+  'recycle bin; requires confirm:true), restore (recycle-bin trashIds back to the archive), trash',
+  '(page through the bin). Permanent deletion is not available through this tool; ask the user to',
+  'use the Archive Desk panel.',
 ].join(' ')
 
 interface ToolArgs {
@@ -146,6 +147,27 @@ export function toolDefinition(
       return { ok: true, action, ...summarizeDelete(result) }
     }
 
+    if (action === 'unarchive') {
+      const ids = strings(args.ids)
+      if (ids.length === 0) {
+        return { ok: false, action, error: 'archive/bad-request: ids required' }
+      }
+      if (ids.length > MAX_IDS) {
+        return {
+          ok: false,
+          action,
+          error: `archive/bad-request: at most ${MAX_IDS} ids per call`,
+        }
+      }
+      const result = await service.unarchive({ ids })
+      return {
+        ok: true,
+        action,
+        unarchived: result.unarchived.length,
+        skipped: result.skipped,
+      }
+    }
+
     if (action === 'restore') {
       const trashIds = strings(args.trashIds)
       if (trashIds.length === 0) {
@@ -189,13 +211,13 @@ export function toolDefinition(
       properties: {
         action: {
           type: 'string',
-          enum: ['list', 'delete', 'restore', 'trash'],
+          enum: ['list', 'unarchive', 'delete', 'restore', 'trash'],
           description: 'Operation to perform.',
         },
         ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Archived session ids for `delete`. Maximum 100.',
+          description: 'Archived session ids for `unarchive` or `delete`. Maximum 100.',
         },
         trashIds: {
           type: 'array',

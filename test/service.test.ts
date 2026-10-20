@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -56,11 +56,18 @@ function makeRegistry(
   unarchiveSession(sessionId: string): Promise<void>
   archiveSession(sessionId: string): Promise<void>
 } {
+  const set = new Set(archived)
   return {
-    archivedSessionIds: archived,
+    get archivedSessionIds() {
+      return [...set]
+    },
     list: () => workspaces,
-    async unarchiveSession() {},
-    async archiveSession() {},
+    async unarchiveSession(sessionId) {
+      set.delete(sessionId)
+    },
+    async archiveSession(sessionId) {
+      set.add(sessionId)
+    },
   }
 }
 
@@ -70,12 +77,13 @@ async function fixture() {
   await mkdir(sessionDir, { recursive: true })
   await writeFile(join(sessionDir, 'session.v4.jsonl.zstd'), Buffer.alloc(42))
 
+  const registry = makeRegistry(
+    [PRESENT, MISSING],
+    [{ id: 'ws-1', title: 'TestSpace', path: 'D:\\Projects\\TestSpace', sessionIds: [PRESENT] }],
+  )
   const service = new ArchiveDeskService({
     home,
-    registry: makeRegistry(
-      [PRESENT, MISSING],
-      [{ id: 'ws-1', title: 'TestSpace', path: 'D:\\Projects\\TestSpace', sessionIds: [PRESENT] }],
-    ),
+    registry,
     sessionQuery: {
       load: async (id: string) => {
         if (id !== PRESENT) throw new Error('not found')
@@ -84,7 +92,7 @@ async function fixture() {
     },
   })
 
-  return { home, sessionDir, service }
+  return { home, sessionDir, registry, service }
 }
 
 test('list describes present and dangling sessions', async (t) => {
@@ -189,6 +197,22 @@ test('list clamps an oversized page and inspect describes a selection', async (t
   assert.equal(inspected.missing, 1)
   assert.equal(inspected.deletable, 2)
   assert.deepEqual(inspected.notArchived, ['session-99999999-9999-4999-8999-999999999999'])
+})
+
+test('unarchive removes the archive reference but keeps the files', async (t) => {
+  const { home, sessionDir, registry, service } = await fixture()
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const unknown = 'session-99999999-9999-4999-8999-999999999999'
+  const result = await service.unarchive({ ids: [PRESENT, MISSING, unknown] })
+
+  assert.deepEqual(result.unarchived, [PRESENT])
+  assert.deepEqual(result.skipped, [
+    { id: MISSING, reason: 'archive/not-found' },
+    { id: unknown, reason: 'archive/not-archived' },
+  ])
+  assert.equal(registry.archivedSessionIds.includes(PRESENT), false)
+  await access(sessionDir)
 })
 
 test('the summary cache is reused across service instances', async (t) => {

@@ -46,6 +46,7 @@ import type {
   ToastState,
   TrashItem,
   TrashListResult,
+  UnarchiveResult,
 } from './types'
 
 const PAGE_SIZE_OPTIONS: PageSize[] = [10, 20, 50]
@@ -583,6 +584,25 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
     }
   }
 
+  const unarchive = async (ids: string[]): Promise<void> => {
+    if (ids.length === 0 || busy) return
+    setBusy(true)
+    try {
+      const result = await call<UnarchiveResult>('unarchive', { ids })
+      const parts = [t('notice.unarchived', { count: result.unarchived.length })]
+      if (result.skipped.length > 0) {
+        parts.push(t('notice.skipped', { count: result.skipped.length }))
+      }
+      showToast(parts.join(' · '), result.unarchived.length > 0 ? 'success' : 'error')
+      clearArchivedSelection()
+      refresh()
+    } catch (failure) {
+      showToast(errorText(failure, t), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const confirm = (): void => {
     if (pending === null || busy) return
     if (pending.kind === 'delete' && (preview === null || preview.deletable === 0)) return
@@ -788,6 +808,15 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={busy || selectedIds.length === 0}
+                  onClick={() => void unarchive(selectedIds)}
+                >
+                  <IconUnarchiveOutlineRegular size={14} />
+                  {t('action.unarchive')} ({selectedIds.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   className="adk-danger"
                   disabled={busy || selectedIds.length === 0}
                   onClick={() => void openDelete(selectedIds)}
@@ -902,6 +931,19 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
                           className="adk-cell-actions"
                           onClick={(event) => event.stopPropagation()}
                         >
+                          {item.status !== 'missing' && (
+                            <Tooltip label={t('action.unarchive')} side="bottom" align="end">
+                              <button
+                                type="button"
+                                className="adk-icon-button"
+                                aria-label={t('action.unarchive')}
+                                disabled={busy}
+                                onClick={() => void unarchive([item.id])}
+                              >
+                                <IconUnarchiveOutlineRegular size={15} />
+                              </button>
+                            </Tooltip>
+                          )}
                           {selectable && (
                             <Tooltip
                               label={

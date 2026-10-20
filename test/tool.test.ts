@@ -14,6 +14,7 @@ interface ToolResult {
   total?: number
   deleted?: number
   restored?: number
+  unarchived?: number
   items?: unknown[]
 }
 
@@ -48,6 +49,10 @@ function definition(overrides: Partial<ArchiveDeskService> = {}) {
     delete: async (request: unknown) => {
       calls.push({ method: 'delete', request })
       return { deleted: ['session-a'], partial: [], skipped: [], freedBytes: 42 }
+    },
+    unarchive: async (request: unknown) => {
+      calls.push({ method: 'unarchive', request })
+      return { unarchived: ['session-a'], skipped: [] }
     },
     restore: async (request: unknown) => {
       calls.push({ method: 'restore', request })
@@ -91,6 +96,19 @@ test('delete requires explicit confirmation and never purges', async () => {
   })
 })
 
+test('unarchive forwards archived ids and reports the count', async () => {
+  const { tool, calls } = definition()
+  const result = await tool.execute({ action: 'unarchive', ids: ['session-a'] })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.unarchived, 1)
+  assert.deepEqual(calls[0], { method: 'unarchive', request: { ids: ['session-a'] } })
+
+  const refused = await tool.execute({ action: 'unarchive' })
+  assert.equal(refused.ok, false)
+  assert.match(refused.error ?? '', /ids required/)
+})
+
 test('restore needs trash ids and reports the count', async () => {
   const { tool, calls } = definition()
 
@@ -124,6 +142,7 @@ test('every tool result survives a lossless JSON round-trip', async () => {
     { action: 'list' },
     { action: 'trash' },
     { action: 'delete', ids: ['session-a'], confirm: true },
+    { action: 'unarchive', ids: ['session-a'] },
     { action: 'restore', trashIds: ['trash-a'] },
     { action: 'nope' },
   ]) {

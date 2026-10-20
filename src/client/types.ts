@@ -69,6 +69,11 @@ export interface TrashListResult {
   items: TrashItem[]
 }
 
+export interface UnarchiveResult {
+  unarchived: string[]
+  skipped: Array<{ id: string; reason: string }>
+}
+
 export interface DeleteResult {
   deleted: string[]
   partial: Array<{ id: string; reason: string }>
