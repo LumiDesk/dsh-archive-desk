@@ -84,37 +84,38 @@ export function toolDefinition(
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
+    // `parameters` is the compact property map the harness compiles into a
+    // JSON Schema (`{name: {type, required?, ...}}`), NOT a JSON Schema object.
+    // Wrapping it in `{type:'object', properties:{...}}` produces a malformed
+    // function schema and every model request fails with
+    // `Invalid schema for function ...`.
     parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        action: {
-          type: 'string',
-          required: true,
-          enum: ['list', 'delete', 'restore', 'trash'],
-          description: 'Operation to perform.',
-        },
-        ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Archived session ids for `delete`. Maximum 100.',
-        },
-        trashIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Recycle-bin entry ids for `restore`.',
-        },
-        query: { type: 'string', description: 'Filter for `list`.' },
-        offset: { type: 'integer', description: 'Page offset for `list` (default 0).' },
-        limit: { type: 'integer', description: 'Page size for `list` (default 20, max 100).' },
-        confirm: {
-          type: 'boolean',
-          description: 'Must be true to perform `delete`. Deletion moves sessions to the bin.',
-        },
+      action: {
+        type: 'string',
+        required: true,
+        enum: ['list', 'delete', 'restore', 'trash'],
+        description: 'Operation to perform.',
+      },
+      ids: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Archived session ids for `delete`. Maximum 100.',
+      },
+      trashIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Recycle-bin entry ids for `restore`.',
+      },
+      query: { type: 'string', description: 'Filter for `list`.' },
+      offset: { type: 'integer', description: 'Page offset for `list` (default 0).' },
+      limit: { type: 'integer', description: 'Page size for `list` (default 20, max 100).' },
+      confirm: {
+        type: 'boolean',
+        description: 'Must be true to perform `delete`. Deletion moves sessions to the bin.',
       },
     },
     output: {
-      schema: { type: 'object', additionalProperties: true },
+      schema: { type: 'object' },
       render: (_args: ToolArgs, value: unknown) => [
         { type: 'text', text: JSON.stringify(value, null, 2) },
       ],

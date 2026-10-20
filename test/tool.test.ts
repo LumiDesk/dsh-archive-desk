@@ -113,3 +113,29 @@ test('unknown actions are rejected, and rendering is plain text', async () => {
   assert.equal(blocks[0]?.type, 'text')
   assert.match(blocks[0]?.text ?? '', /"ok": true/)
 })
+
+test('parameters stay a compact property map, never a wrapped JSON schema', () => {
+  // The harness compiles this map into a JSON Schema. Passing a schema object
+  // once produced `Invalid schema for function ...: true is not of type
+  // "array"` and broke every model request.
+  const { tool } = definition()
+  const parameters = (tool as unknown as { parameters: Record<string, unknown> }).parameters
+
+  assert.equal('type' in parameters, false)
+  assert.equal('properties' in parameters, false)
+  assert.deepEqual(Object.keys(parameters).sort(), [
+    'action',
+    'confirm',
+    'ids',
+    'limit',
+    'offset',
+    'query',
+    'trashIds',
+  ])
+  for (const value of Object.values(parameters)) {
+    const spec = value as { type?: unknown; items?: unknown }
+    assert.equal(typeof spec.type, 'string')
+    if (spec.type === 'array') assert.equal(typeof spec.items, 'object')
+  }
+  assert.equal((parameters.action as { required?: boolean }).required, true)
+})

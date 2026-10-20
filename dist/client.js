@@ -356,68 +356,17 @@ var __dshArchiveDesk = (() => {
         height: size,
         viewBox: "0 0 24 24",
         fill: "none",
+        stroke: "currentColor",
+        strokeWidth: "1.5",
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
         "aria-hidden": "true",
         style: { display: "block" },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-            "linearGradient",
-            {
-              id: "archive-desk-stroke",
-              x1: "4",
-              y1: "3",
-              x2: "20",
-              y2: "21",
-              gradientUnits: "userSpaceOnUse",
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("stop", { offset: "0", stopColor: "#3964FE" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("stop", { offset: "0.55", stopColor: "#4D6BFE" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("stop", { offset: "1", stopColor: "#8B76F6" })
-              ]
-            }
-          ) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "rect",
-            {
-              x: "3",
-              y: "4",
-              width: "18",
-              height: "4.5",
-              rx: "1.5",
-              fill: "url(#archive-desk-stroke)",
-              fillOpacity: "0.16",
-              stroke: "url(#archive-desk-stroke)",
-              strokeWidth: "1.5"
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "path",
-            {
-              d: "M4.75 8.5v9.75A1.75 1.75 0 0 0 6.5 20h11a1.75 1.75 0 0 0 1.75-1.75V8.5",
-              stroke: "url(#archive-desk-stroke)",
-              strokeWidth: "1.5",
-              strokeLinecap: "round",
-              strokeLinejoin: "round"
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "path",
-            {
-              d: "M12 11.6v4.6",
-              stroke: "url(#archive-desk-stroke)",
-              strokeWidth: "1.5",
-              strokeLinecap: "round"
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "path",
-            {
-              d: "m9.9 14.3 2.1 2.1 2.1-2.1",
-              stroke: "url(#archive-desk-stroke)",
-              strokeWidth: "1.5",
-              strokeLinecap: "round",
-              strokeLinejoin: "round"
-            }
-          )
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("rect", { x: "3", y: "4", width: "18", height: "4.5", rx: "1.5", fill: "currentColor", fillOpacity: "0.12" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M4.75 8.5v9.75A1.75 1.75 0 0 0 6.5 20h11a1.75 1.75 0 0 0 1.75-1.75V8.5" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "M12 11.6v4.6" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("path", { d: "m9.9 14.3 2.1 2.1 2.1-2.1" })
         ]
       }
     );

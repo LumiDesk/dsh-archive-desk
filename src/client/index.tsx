@@ -401,7 +401,11 @@ async function call<T>(endpoint: string, payload: unknown): Promise<T> {
   throw new Error(envelope.error?.message ?? `HTTP ${response.status}`)
 }
 
-/** Sidebar glyph: the same archive box as the plugin icon, as a gradient. */
+/**
+ * Sidebar glyph. Monochrome on purpose: the sidebar renders icons in the
+ * theme's own label color, so the stroke and the faint lid tint both use
+ * `currentColor` and follow light/dark without a hardcoded brand color.
+ */
 function ArchiveDeskIcon({ size = 18 }: { size?: number }) {
   return (
     <svg
@@ -409,54 +413,17 @@ function ArchiveDeskIcon({ size = 18 }: { size?: number }) {
       height={size}
       viewBox="0 0 24 24"
       fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
       style={{ display: 'block' }}
     >
-      <defs>
-        <linearGradient
-          id="archive-desk-stroke"
-          x1="4"
-          y1="3"
-          x2="20"
-          y2="21"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0" stopColor="#3964FE" />
-          <stop offset="0.55" stopColor="#4D6BFE" />
-          <stop offset="1" stopColor="#8B76F6" />
-        </linearGradient>
-      </defs>
-      <rect
-        x="3"
-        y="4"
-        width="18"
-        height="4.5"
-        rx="1.5"
-        fill="url(#archive-desk-stroke)"
-        fillOpacity="0.16"
-        stroke="url(#archive-desk-stroke)"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M4.75 8.5v9.75A1.75 1.75 0 0 0 6.5 20h11a1.75 1.75 0 0 0 1.75-1.75V8.5"
-        stroke="url(#archive-desk-stroke)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12 11.6v4.6"
-        stroke="url(#archive-desk-stroke)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-      <path
-        d="m9.9 14.3 2.1 2.1 2.1-2.1"
-        stroke="url(#archive-desk-stroke)"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <rect x="3" y="4" width="18" height="4.5" rx="1.5" fill="currentColor" fillOpacity="0.12" />
+      <path d="M4.75 8.5v9.75A1.75 1.75 0 0 0 6.5 20h11a1.75 1.75 0 0 0 1.75-1.75V8.5" />
+      <path d="M12 11.6v4.6" />
+      <path d="m9.9 14.3 2.1 2.1 2.1-2.1" />
     </svg>
   )
 }
