@@ -14,6 +14,32 @@ const NS = 'archive-desk'
 const ROUTE = '/archive-desk'
 const PAGE_SIZE = 20
 
+/**
+ * Cross-component hand-off: the sidebar session menu asks the panel to delete
+ * one session. The panel may not be mounted yet when the click lands, so the
+ * request is parked until a subscriber appears (mount) or fires immediately.
+ */
+let pendingDeletion: string | null = null
+const deletionListeners = new Set<() => void>()
+
+function requestDeletion(sessionId: string): void {
+  pendingDeletion = sessionId
+  for (const listener of deletionListeners) listener()
+}
+
+function takeDeletion(): string | null {
+  const value = pendingDeletion
+  pendingDeletion = null
+  return value
+}
+
+function subscribeDeletion(listener: () => void): () => void {
+  deletionListeners.add(listener)
+  return () => {
+    deletionListeners.delete(listener)
+  }
+}
+
 type Translate = (key: string, params?: Record<string, string | number>) => string
 
 interface ArchivedItem {
@@ -605,6 +631,38 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
     void refresh()
   }, [refresh])
 
+  // A delete request from the sidebar session menu: locate the row, then open
+  // the same confirmation the list uses. Runs once on mount as well, because
+  // the menu may have fired it before the panel was rendered.
+  useEffect(() => {
+    let active = true
+
+    const openRequested = async (): Promise<void> => {
+      const id = takeDeletion()
+      if (id === null || !active) return
+      try {
+        const found = await call<ListResult>('list', { query: id, limit: 5 })
+        const item = found.items.find((row) => row.id === id)
+        if (item === undefined || !active) return
+        setTab('archived')
+        setDialogMode('trash')
+        setPending({ kind: 'delete', ids: [id], labels: [item.title], bytes: item.sizeBytes })
+      } catch {
+        // Leave the panel usable; the row is still reachable from the list.
+      }
+    }
+
+    const unsubscribe = subscribeDeletion(() => {
+      void openRequested()
+    })
+    void openRequested()
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
   const totalBytes = useMemo(
     () =>
       tab === 'archived' ? list.totalBytes : trash.reduce((sum, item) => sum + item.sizeBytes, 0),
@@ -911,6 +969,51 @@ function ArchiveDeskPage({ t }: { t: Translate }) {
   )
 }
 
+interface MenuRowProps {
+  sessionId: string
+  displayTitle?: string
+  useWorkspaces: (
+    selector: (state: { archivedSessionIds: readonly string[] }) => boolean,
+  ) => boolean
+  useMenuOpenState: () => [boolean, (open: boolean) => void]
+  t: Translate
+  openPanel: () => void
+}
+
+/**
+ * One row in a session's "…" menu, only for sessions that are archived.
+ * It reuses the panel's confirmation instead of carrying a second delete path.
+ */
+function SessionMenuDelete(props: MenuRowProps) {
+  const { sessionId, useWorkspaces, useMenuOpenState, t, openPanel } = props
+  const [, setMenuOpen] = useMenuOpenState()
+  const archived = useWorkspaces((state) => state.archivedSessionIds.includes(sessionId))
+
+  if (!archived) return null
+
+  return (
+    <>
+      <style>{`
+        .archive-desk-menu-row{display:flex;align-items:center;width:100%;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;text-align:left;cursor:pointer}
+        .archive-desk-menu-row:hover{background:var(--dsw-alias-bg-layer-2)}
+        .archive-desk-menu-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
+      `}</style>
+      <button
+        type="button"
+        role="menuitem"
+        className="archive-desk-menu-row"
+        onClick={() => {
+          setMenuOpen(false)
+          requestDeletion(sessionId)
+          openPanel()
+        }}
+      >
+        {t('action.delete')}
+      </button>
+    </>
+  )
+}
+
 export interface ClientContext {
   slots: {
     inject(name: string, register: () => unknown): unknown
@@ -919,6 +1022,9 @@ export interface ClientContext {
   locale: {
     register(ns: string, dicts: Record<string, Record<string, string>>): () => void
     bind(ns: string): Translate
+  }
+  layout: {
+    selectPanel(panelId: string): void
   }
   effect(execute: () => () => void, label?: string): unknown
 }
@@ -930,7 +1036,7 @@ export interface ClientPlugin {
 
 export function create(_require: (id: string) => unknown): ClientPlugin {
   return {
-    inject: ['slots', 'locale'],
+    inject: ['slots', 'locale', 'layout'],
     apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'archive-desk: dictionaries')
       const t = ctx.locale.bind(NS)
@@ -957,6 +1063,22 @@ export function create(_require: (id: string) => unknown): ClientPlugin {
             inject: () => ({ t }),
           },
           ArchiveDeskPage,
+        ),
+      )
+
+      ctx.slots.inject('sidebar.workspaces.session.menu.item', () =>
+        ctx.slots.register(
+          {
+            name: 'sidebar.workspaces.session.menu.item',
+            id: 'archive-desk-delete',
+            order: 460,
+            locale: NS,
+            inject: () => ({
+              t,
+              openPanel: () => ctx.layout.selectPanel(PANEL_ID),
+            }),
+          },
+          SessionMenuDelete,
         ),
       )
     },

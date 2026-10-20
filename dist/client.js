@@ -36,6 +36,23 @@ var __dshArchiveDesk = (() => {
   var NS = "archive-desk";
   var ROUTE = "/archive-desk";
   var PAGE_SIZE = 20;
+  var pendingDeletion = null;
+  var deletionListeners = /* @__PURE__ */ new Set();
+  function requestDeletion(sessionId) {
+    pendingDeletion = sessionId;
+    for (const listener of deletionListeners) listener();
+  }
+  function takeDeletion() {
+    const value = pendingDeletion;
+    pendingDeletion = null;
+    return value;
+  }
+  function subscribeDeletion(listener) {
+    deletionListeners.add(listener);
+    return () => {
+      deletionListeners.delete(listener);
+    };
+  }
   var colors = {
     text: "var(--dsw-alias-label-primary)",
     secondary: "var(--dsw-alias-label-secondary)",
@@ -533,6 +550,30 @@ var __dshArchiveDesk = (() => {
     (0, import_react.useEffect)(() => {
       void refresh();
     }, [refresh]);
+    (0, import_react.useEffect)(() => {
+      let active = true;
+      const openRequested = async () => {
+        const id = takeDeletion();
+        if (id === null || !active) return;
+        try {
+          const found = await call("list", { query: id, limit: 5 });
+          const item = found.items.find((row) => row.id === id);
+          if (item === void 0 || !active) return;
+          setTab("archived");
+          setDialogMode("trash");
+          setPending({ kind: "delete", ids: [id], labels: [item.title], bytes: item.sizeBytes });
+        } catch {
+        }
+      };
+      const unsubscribe = subscribeDeletion(() => {
+        void openRequested();
+      });
+      void openRequested();
+      return () => {
+        active = false;
+        unsubscribe();
+      };
+    }, []);
     const totalBytes = (0, import_react.useMemo)(
       () => tab === "archived" ? list.totalBytes : trash.reduce((sum, item) => sum + item.sizeBytes, 0),
       [tab, list.totalBytes, trash]
@@ -797,9 +838,36 @@ var __dshArchiveDesk = (() => {
       )
     ] });
   }
+  function SessionMenuDelete(props) {
+    const { sessionId, useWorkspaces, useMenuOpenState, t, openPanel } = props;
+    const [, setMenuOpen] = useMenuOpenState();
+    const archived = useWorkspaces((state) => state.archivedSessionIds.includes(sessionId));
+    if (!archived) return null;
+    return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("style", { children: `
+        .archive-desk-menu-row{display:flex;align-items:center;width:100%;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:13px;text-align:left;cursor:pointer}
+        .archive-desk-menu-row:hover{background:var(--dsw-alias-bg-layer-2)}
+        .archive-desk-menu-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
+      ` }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "button",
+        {
+          type: "button",
+          role: "menuitem",
+          className: "archive-desk-menu-row",
+          onClick: () => {
+            setMenuOpen(false);
+            requestDeletion(sessionId);
+            openPanel();
+          },
+          children: t("action.delete")
+        }
+      )
+    ] });
+  }
   function create(_require) {
     return {
-      inject: ["slots", "locale"],
+      inject: ["slots", "locale", "layout"],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), "archive-desk: dictionaries");
         const t = ctx.locale.bind(NS);
@@ -826,6 +894,22 @@ var __dshArchiveDesk = (() => {
               inject: () => ({ t })
             },
             ArchiveDeskPage
+          )
+        );
+        ctx.slots.inject(
+          "sidebar.workspaces.session.menu.item",
+          () => ctx.slots.register(
+            {
+              name: "sidebar.workspaces.session.menu.item",
+              id: "archive-desk-delete",
+              order: 460,
+              locale: NS,
+              inject: () => ({
+                t,
+                openPanel: () => ctx.layout.selectPanel(PANEL_ID)
+              })
+            },
+            SessionMenuDelete
           )
         );
       }

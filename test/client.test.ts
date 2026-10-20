@@ -35,7 +35,7 @@ test('client bundle registers the sidebar entry and the panel', async () => {
   assert.equal(bundle.id, 'dsh-archive-desk')
 
   const plugin = bundle.factory(() => ({}))
-  assert.deepEqual(plugin.inject, ['slots', 'locale'])
+  assert.deepEqual(plugin.inject, ['slots', 'locale', 'layout'])
 
   const registered: Registered[] = []
   const ctx = {
@@ -51,13 +51,18 @@ test('client bundle registers the sidebar entry and the panel', async () => {
         return () => undefined
       },
     },
+    layout: {
+      selectPanel: () => undefined,
+    },
   }
 
   plugin.apply(ctx)
 
-  assert.equal(registered.length, 2)
+  assert.equal(registered.length, 3)
   assert.equal(registered[0]?.name, 'sidebar.panellist')
   assert.equal(registered[0]?.id, 'archive-desk')
   assert.equal(registered[1]?.name, 'main')
   assert.equal(registered[1]?.key, 'archive-desk')
+  assert.equal(registered[2]?.name, 'sidebar.workspaces.session.menu.item')
+  assert.equal(registered[2]?.id, 'archive-desk-delete')
 })
