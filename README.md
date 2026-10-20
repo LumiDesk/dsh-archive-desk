@@ -2,8 +2,8 @@
 
 > **Archived-conversation manager for DeepSeek Harness** — browse, restore, recycle, and permanently delete archived sessions.
 
-[![npm](https://img.shields.io/npm/v/dsh-archive-desk.svg)](https://www.npmjs.com/package/dsh-archive-desk)
-[![license](https://img.shields.io/npm/l/dsh-archive-desk.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-archive-desk.svg?style=flat)](https://www.npmjs.com/package/dsh-archive-desk)
+[![license](https://img.shields.io/npm/l/dsh-archive-desk.svg?style=flat)](./LICENSE)
 
 ![归档工作台](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/panel.png)
 
