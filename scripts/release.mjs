@@ -67,6 +67,15 @@ function capture(command, args) {
   return execSync(commandLine(command, args), { cwd: root, encoding: 'utf8' }).trim()
 }
 
+/** Capture a probe whose expected failure is part of the answer. */
+function captureQuiet(command, args) {
+  return execSync(commandLine(command, args), {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim()
+}
+
 function succeeds(commandLine) {
   try {
     execSync(commandLine, { cwd: root, stdio: 'ignore' })
@@ -139,7 +148,7 @@ if (branch !== 'main') console.warn(`\n⚠ 当前分支是 ${branch}，不是 ma
 // 2. 目标版本不能在 npm 上已存在（存在就会发布失败，提前失败更清楚）。
 let alreadyPublished = false
 try {
-  alreadyPublished = capture('npm', ['view', `${pkg.name}@${nextVersion}`, 'version']) !== ''
+  alreadyPublished = captureQuiet('npm', ['view', `${pkg.name}@${nextVersion}`, 'version']) !== ''
 } catch {
   alreadyPublished = false // npm view 对不存在的版本以非 0 退出
 }
