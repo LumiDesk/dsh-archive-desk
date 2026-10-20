@@ -5,11 +5,18 @@
 [![npm](https://img.shields.io/npm/v/dsh-archive-desk.svg?style=flat)](https://www.npmjs.com/package/dsh-archive-desk)
 [![license](https://img.shields.io/npm/l/dsh-archive-desk.svg?style=flat)](./LICENSE)
 
-![归档工作台](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/panel.png)
+![dsh-archive-desk · 归档工作台](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/social-preview.png)
 
 DeepSeek Harness（DSH）只提供「归档」：它把会话 id 藏进 `~/.dsh/storages/workspace.json`，
 日志继续留在磁盘上，界面上再没有任何删除入口。这个插件补上后半段——**看得见、恢复得了、
 删得掉**，并且把同一套能力开放给 Agent。
+
+## 预览
+
+![归档工作台：已归档列表、搜索与批量删除](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/panel.png)
+
+侧栏点「归档工作台」进入整页管理：「已归档」与「回收站」两个页签，支持按标题 / 摘要 / 项目搜索、
+多选与批量删除；删除默认进回收站，彻底删除要二次确认。
 
 ## 为什么需要它
 
