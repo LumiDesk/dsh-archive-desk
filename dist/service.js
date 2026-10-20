@@ -322,11 +322,20 @@ export class ArchiveDeskService {
     async cleanDangling() {
         this.requireRegistry();
         const archivedIds = this.archivedIds().filter(isSessionId);
-        const locations = await this.sessionLocations(archivedIds);
+        const root = sessionsRoot(this.deps.home);
         const removed = [];
         const failed = [];
         for (const id of archivedIds) {
-            if (locations.has(id))
+            let location;
+            try {
+                location = await locateSession(root, id);
+            }
+            catch (error) {
+                // A duplicate id is not a dangling reference; leave it for a human.
+                failed.push({ id, reason: reasonOf(error) });
+                continue;
+            }
+            if (location !== undefined)
                 continue;
             try {
                 await this.forget(id);
