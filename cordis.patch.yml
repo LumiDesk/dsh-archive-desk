@@ -4,8 +4,8 @@
 # package.json and loaded by the Web plugin table, not by a second row.
 #
 # `id` is the Loader entry id and is also what the Plugin Manager lists; keep it
-# stable across releases so user patches can target it.
+# stable across releases so user patches can target it. The plugin deliberately
+# has no config block: see docs/设计.md §8.
 - insert:
     - id: archive-desk
       name: dsh-archive-desk
-      config: {}

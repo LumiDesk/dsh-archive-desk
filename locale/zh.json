@@ -1,20 +1,7 @@
 {
   "meta": {
     "title": "归档工作台",
-    "description": "管理已归档的对话：预览、恢复、移入回收站或彻底删除，支持批量操作与 Agent 调用。"
+    "description": "管理已归档的对话：查看状态、搜索、恢复、移入回收站或彻底删除，支持批量操作与 Agent 调用。"
   },
-  "panel": "归档工作台",
-  "page.title": "归档工作台",
-  "page.summary": "{count} 个已归档对话 · {size}",
-  "tab.archived": "已归档",
-  "tab.trash": "回收站",
-  "search.placeholder": "搜索标题、摘要或项目",
-  "action.selectAll": "全选",
-  "action.delete": "删除所选",
-  "action.restore": "恢复",
-  "action.purge": "彻底删除",
-  "action.emptyTrash": "清空回收站",
-  "toggle.trash": "删除时放入回收站",
-  "empty.archived": "还没有归档的对话。",
-  "empty.trash": "回收站是空的。"
+  "panel": "归档工作台"
 }
