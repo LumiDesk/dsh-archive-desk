@@ -170,8 +170,20 @@ run('npm', ['version', nextVersion, '-m', `chore(release): ${tag}`])
 
 // 5. 发布（prepublishOnly 会再跑一遍 build + test）。
 if (!skipPublish) {
-  run('npm', ['publish'])
-  console.log(`\n✔ 已发布 ${pkg.name}@${nextVersion} 到 npm`)
+  console.log(`\n$ npm publish`)
+  try {
+    execSync('npm publish', { cwd: root, stdio: 'inherit' })
+    console.log(`\n✔ 已发布 ${pkg.name}@${nextVersion} 到 npm`)
+  } catch {
+    console.error('\n✖ npm publish 失败。')
+    console.error('  若提示 EOTP / 需要 Security key 授权：npm 11 的分阶段发布要求交互式终端。')
+    console.error('  请在能打开浏览器的终端里执行：')
+    console.error('    npm publish')
+    console.error('  发布成功后手动推送：')
+    console.error(`    git push origin HEAD && git push origin ${tag}`)
+    console.error('  版本提交与 tag 已保留在本地，不需要回滚。')
+    process.exit(1)
+  }
 } else {
   console.log('\n跳过 npm publish（--no-publish）')
 }

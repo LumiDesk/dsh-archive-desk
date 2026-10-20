@@ -125,7 +125,11 @@ pnpm release minor --dry-run
 
 脚本 `scripts/release.mjs` 会依次做：工作区干净检查 → 目标版本未被占用检查 →
 `typecheck` / `lint` / `test` → `npm version`（提交并打 `vX.Y.Z` tag）→ `npm publish` →
-推送提交与 tag → `gh release create --generate-notes`。任何一步失败都会停下并打印回滚命令。
+推送提交与 tag → `gh release create --generate-notes`。任何一步失败都会停下并打印下一步该做什么。
+
+> npm 11 的分阶段发布 + Security key（passkey）意味着 `npm publish` 必须在**能打开浏览器的交互式终端**
+> 里完成授权；在 CI 或非交互 shell 里会得到 `EOTP`。脚本遇到这种情况会保留版本提交与 tag，并提示你
+> 手动完成 `npm publish` 后再推送。
 
 可选参数：`--dry-run`、`--no-checks`、`--no-publish`、`--no-push`、`--no-release`、`--allow-dirty`。
 
