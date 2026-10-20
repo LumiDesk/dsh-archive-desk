@@ -115,6 +115,27 @@ test('unknown actions are rejected, and rendering is plain text', async () => {
   assert.match(blocks[0]?.text ?? '', /"ok": true/)
 })
 
+test('every tool result survives a lossless JSON round-trip', async () => {
+  // A list row without a workspace used to carry `workspaceTitle: undefined`,
+  // which the tool layer rejects with "value is not lossless JSON".
+  const { tool } = definition()
+
+  for (const args of [
+    { action: 'list' },
+    { action: 'trash' },
+    { action: 'delete', ids: ['session-a'], confirm: true },
+    { action: 'restore', trashIds: ['trash-a'] },
+    { action: 'nope' },
+  ]) {
+    const value = await tool.execute(args)
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(value)),
+      value,
+      `round-trip failed for ${args.action}`,
+    )
+  }
+})
+
 test('tool schemas pass the harness JSON Schema validator', () => {
   // Two earlier shapes broke every model request:
   //   - property-level `required: true` → `true is not of type "array"`

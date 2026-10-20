@@ -42,6 +42,15 @@ function strings(value: unknown, limit: number): string[] {
   )
 }
 
+/**
+ * The tool layer rejects a result that is not lossless JSON (`undefined`, NaN,
+ * a class instance). Round-tripping is the cheapest guarantee that whatever
+ * the service produced can travel as a tool result.
+ */
+function losslessJson(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value)) as unknown
+}
+
 function truncatedTrash(entries: readonly TrashMeta[]): unknown[] {
   return entries.map((entry) => ({
     trashId: entry.trashId,
@@ -60,7 +69,9 @@ function summarizeList(result: ListResult): Record<string, unknown> {
       id: item.id,
       title: item.title,
       snippet: item.snippet,
-      workspaceTitle: item.workspaceTitle,
+      // An absent workspace must not surface as `undefined`: the tool layer
+      // rejects a result that is not lossless JSON.
+      ...(item.workspaceTitle === undefined ? {} : { workspaceTitle: item.workspaceTitle }),
       updatedAt: item.updatedAt,
       sizeBytes: item.sizeBytes,
       status: item.status,
@@ -81,6 +92,62 @@ export function toolDefinition(
   createService: (ctx: Context) => ArchiveDeskService,
   ctx: Context,
 ): Record<string, unknown> {
+  const run = async (args: ToolArgs): Promise<Record<string, unknown>> => {
+    const service = createService(ctx)
+    const action = typeof args.action === 'string' ? args.action : ''
+
+    if (action === 'list') {
+      const request = {
+        ...(typeof args.query === 'string' ? { query: args.query } : {}),
+        ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
+        ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+      }
+      return { ok: true, action, ...summarizeList(await service.list(request)) }
+    }
+
+    if (action === 'trash') {
+      const entries = await service.listTrash()
+      return { ok: true, action, total: entries.length, items: truncatedTrash(entries) }
+    }
+
+    if (action === 'delete') {
+      const ids = strings(args.ids, MAX_IDS)
+      if (ids.length === 0) {
+        return { ok: false, action, error: 'archive/bad-request: ids required' }
+      }
+      if (args.confirm !== true) {
+        return {
+          ok: false,
+          action,
+          error:
+            'archive/forbidden: pass confirm:true to move these conversations to the recycle bin',
+        }
+      }
+      const result = await service.delete({ ids, mode: 'trash' })
+      return { ok: true, action, ...summarizeDelete(result) }
+    }
+
+    if (action === 'restore') {
+      const trashIds = strings(args.trashIds, MAX_IDS)
+      if (trashIds.length === 0) {
+        return { ok: false, action, error: 'archive/bad-request: trashIds required' }
+      }
+      const result = await service.restore({ trashIds })
+      return {
+        ok: true,
+        action,
+        restored: result.restored.length,
+        failed: result.failed,
+      }
+    }
+
+    return {
+      ok: false,
+      action,
+      error: `archive/bad-request: unknown action ${JSON.stringify(action)}`,
+    }
+  }
+
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
@@ -124,59 +191,8 @@ export function toolDefinition(
         { type: 'text', text: JSON.stringify(value, null, 2) },
       ],
     },
-    async execute(args: ToolArgs): Promise<Record<string, unknown>> {
-      const service = createService(ctx)
-      const action = typeof args.action === 'string' ? args.action : ''
-
-      if (action === 'list') {
-        const request = {
-          ...(typeof args.query === 'string' ? { query: args.query } : {}),
-          ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
-          ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
-        }
-        return { ok: true, action, ...summarizeList(await service.list(request)) }
-      }
-
-      if (action === 'trash') {
-        const entries = await service.listTrash()
-        return { ok: true, action, total: entries.length, items: truncatedTrash(entries) }
-      }
-
-      if (action === 'delete') {
-        const ids = strings(args.ids, MAX_IDS)
-        if (ids.length === 0)
-          return { ok: false, action, error: 'archive/bad-request: ids required' }
-        if (args.confirm !== true) {
-          return {
-            ok: false,
-            action,
-            error:
-              'archive/forbidden: pass confirm:true to move these conversations to the recycle bin',
-          }
-        }
-        const result = await service.delete({ ids, mode: 'trash' })
-        return { ok: true, action, ...summarizeDelete(result) }
-      }
-
-      if (action === 'restore') {
-        const trashIds = strings(args.trashIds, MAX_IDS)
-        if (trashIds.length === 0) {
-          return { ok: false, action, error: 'archive/bad-request: trashIds required' }
-        }
-        const result = await service.restore({ trashIds })
-        return {
-          ok: true,
-          action,
-          restored: result.restored.length,
-          failed: result.failed,
-        }
-      }
-
-      return {
-        ok: false,
-        action,
-        error: `archive/bad-request: unknown action ${JSON.stringify(action)}`,
-      }
-    },
+    // The tool layer validates the returned value as lossless JSON; the
+    // round-trip is the guarantee, the field fixes above are the cause.
+    execute: async (args: ToolArgs) => losslessJson(await run(args)),
   }
 }
