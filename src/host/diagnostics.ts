@@ -18,7 +18,8 @@ import { join } from 'node:path'
 
 import { archiveDeskRoot } from './paths.ts'
 
-export type BootStage = 'apply-start' | 'injected' | 'registered' | 'bind-error'
+export type BootStage =
+  'apply-start' | 'injected' | 'registered' | 'bind-error' | 'tool-registered' | 'tool-error'
 
 export interface BootEvent {
   at: string

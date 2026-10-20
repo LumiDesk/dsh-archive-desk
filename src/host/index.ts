@@ -30,6 +30,7 @@ import {
   type SessionQueryLike,
   type WorkspaceRegistryLike,
 } from './service.ts'
+import { toolDefinition } from './tool.ts'
 
 /** HTTP prefix this plugin owns. The Client half must use the same string. */
 export const ROUTE_PATH = '/archive-desk'
@@ -290,6 +291,25 @@ export function apply(ctx: Context): void {
       boot('registered')
     } catch (error) {
       boot('bind-error', error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  // The Agent tool is registered on its own fiber: a rejected definition must
+  // cost the tool, never the panel.
+  ctx.inject(['tools'], (toolCtx) => {
+    try {
+      const tools = (
+        toolCtx as unknown as {
+          tools: { register(definition: unknown): () => void }
+        }
+      ).tools
+      toolCtx.effect(
+        () => tools.register(toolDefinition(createService, ctx)),
+        'archive-desk: agent tool',
+      )
+      boot('tool-registered')
+    } catch (error) {
+      boot('tool-error', error instanceof Error ? error.message : String(error))
     }
   })
 }

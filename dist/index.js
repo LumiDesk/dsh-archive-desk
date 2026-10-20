@@ -1,6 +1,7 @@
 import { PROBED_AT_BOOT, recordBoot } from "./diagnostics.js";
 import { ArchiveDeskError, resolveDshHome } from "./paths.js";
 import { ArchiveDeskService, } from "./service.js";
+import { toolDefinition } from "./tool.js";
 /** HTTP prefix this plugin owns. The Client half must use the same string. */
 export const ROUTE_PATH = '/archive-desk';
 /** Loader entry name; also the display key under the Plugin Manager. */
@@ -204,6 +205,18 @@ export function apply(ctx) {
         }
         catch (error) {
             boot('bind-error', error instanceof Error ? error.message : String(error));
+        }
+    });
+    // The Agent tool is registered on its own fiber: a rejected definition must
+    // cost the tool, never the panel.
+    ctx.inject(['tools'], (toolCtx) => {
+        try {
+            const tools = toolCtx.tools;
+            toolCtx.effect(() => tools.register(toolDefinition(createService, ctx)), 'archive-desk: agent tool');
+            boot('tool-registered');
+        }
+        catch (error) {
+            boot('tool-error', error instanceof Error ? error.message : String(error));
         }
     });
 }
