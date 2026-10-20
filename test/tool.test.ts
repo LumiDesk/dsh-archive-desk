@@ -41,13 +41,13 @@ function definition(overrides: Partial<ArchiveDeskService> = {}) {
         ],
       }
     },
-    listTrash: async () => {
-      calls.push({ method: 'listTrash', request: {} })
-      return []
+    listTrash: async (request: unknown) => {
+      calls.push({ method: 'listTrash', request })
+      return { total: 0, totalBytes: 0, offset: 0, limit: 50, items: [] }
     },
     delete: async (request: unknown) => {
       calls.push({ method: 'delete', request })
-      return { deleted: ['session-a'], skipped: [], freedBytes: 42 }
+      return { deleted: ['session-a'], partial: [], skipped: [], freedBytes: 42 }
     },
     restore: async (request: unknown) => {
       calls.push({ method: 'restore', request })
@@ -134,6 +134,49 @@ test('every tool result survives a lossless JSON round-trip', async () => {
       `round-trip failed for ${args.action}`,
     )
   }
+})
+
+test('delete refuses more than 100 ids instead of silently truncating', async () => {
+  const { tool, calls } = definition()
+  const ids = Array.from({ length: 101 }, (_, index) => `session-${String(index)}`)
+  const result = await tool.execute({ action: 'delete', ids, confirm: true })
+
+  assert.equal(result.ok, false)
+  assert.match(result.error ?? '', /at most 100/)
+  assert.equal(calls.length, 0)
+})
+
+test('trash forwards paging and renders corrupt entries', async () => {
+  const calls: Array<{ method: string; request: unknown }> = []
+  const service = {
+    listTrash: async (request: unknown) => {
+      calls.push({ method: 'listTrash', request })
+      return {
+        total: 1,
+        totalBytes: 0,
+        offset: 10,
+        limit: 5,
+        items: [
+          {
+            trashId: 'trash-broken',
+            status: 'corrupt',
+            title: 'broken',
+            snippet: '',
+            sizeBytes: 0,
+            reason: 'payload',
+          },
+        ],
+      }
+    },
+  } as unknown as ArchiveDeskService
+  const tool = toolDefinition(() => service, {} as Context) as unknown as {
+    execute(args: unknown): Promise<{ items?: Array<{ status?: string }>; total?: number }>
+  }
+
+  const result = await tool.execute({ action: 'trash', offset: 10, limit: 5 })
+  assert.equal(result.total, 1)
+  assert.equal(result.items?.[0]?.status, 'corrupt')
+  assert.deepEqual(calls[0], { method: 'listTrash', request: { offset: 10, limit: 5 } })
 })
 
 test('tool schemas pass the harness JSON Schema validator', () => {

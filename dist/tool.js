@@ -2,14 +2,15 @@ const TOOL_NAME = 'archived_conversations';
 const MAX_IDS = 100;
 const TOOL_DESCRIPTION = [
     'List, delete (into the recycle bin) or restore archived DeepSeek Harness conversations.',
-    'Actions: list (newest first, with title/preview/size), delete (archived ids -> recycle bin;',
-    'requires confirm:true), restore (recycle-bin trashIds back to the archive), trash (list the bin).',
-    'Permanent deletion is not available through this tool; ask the user to use the Archive Desk panel.',
+    'Actions: list (newest first, with title/preview/size and running/open state), delete (archived',
+    'ids -> recycle bin; requires confirm:true), restore (recycle-bin trashIds back to the archive),',
+    'trash (page through the bin). Permanent deletion is not available through this tool; ask the',
+    'user to use the Archive Desk panel.',
 ].join(' ');
-function strings(value, limit) {
+function strings(value) {
     if (!Array.isArray(value))
         return [];
-    return [...new Set(value.filter((entry) => typeof entry === 'string'))].slice(0, limit);
+    return [...new Set(value.filter((entry) => typeof entry === 'string'))];
 }
 /**
  * The tool layer rejects a result that is not lossless JSON (`undefined`, NaN,
@@ -20,18 +21,22 @@ function losslessJson(value) {
     return JSON.parse(JSON.stringify(value));
 }
 function truncatedTrash(entries) {
-    return entries.map((entry) => ({
+    return (entries ?? []).map((entry) => ({
         trashId: entry.trashId,
-        sessionId: entry.sessionId,
+        status: entry.status,
+        ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
         title: entry.title,
         sizeBytes: entry.sizeBytes,
-        movedAt: entry.movedAt,
+        ...(entry.movedAt === undefined ? {} : { movedAt: entry.movedAt }),
+        ...(entry.reason === undefined ? {} : { reason: entry.reason }),
     }));
 }
 function summarizeList(result) {
     return {
         total: result.total,
         totalBytes: result.totalBytes,
+        missing: result.missing ?? 0,
+        missingTotal: result.missingTotal ?? result.missing ?? 0,
         items: result.items.map((item) => ({
             id: item.id,
             title: item.title,
@@ -48,6 +53,7 @@ function summarizeList(result) {
 function summarizeDelete(result) {
     return {
         deleted: result.deleted.length,
+        partial: result.partial ?? [],
         freedBytes: result.freedBytes,
         skipped: result.skipped,
     };
@@ -66,13 +72,29 @@ export function toolDefinition(createService, ctx) {
             return { ok: true, action, ...summarizeList(await service.list(request)) };
         }
         if (action === 'trash') {
-            const entries = await service.listTrash();
-            return { ok: true, action, total: entries.length, items: truncatedTrash(entries) };
+            const page = await service.listTrash({
+                ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
+                ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+            });
+            return {
+                ok: true,
+                action,
+                total: page.total,
+                totalBytes: page.totalBytes,
+                items: truncatedTrash(page.items),
+            };
         }
         if (action === 'delete') {
-            const ids = strings(args.ids, MAX_IDS);
+            const ids = strings(args.ids);
             if (ids.length === 0) {
                 return { ok: false, action, error: 'archive/bad-request: ids required' };
+            }
+            if (ids.length > MAX_IDS) {
+                return {
+                    ok: false,
+                    action,
+                    error: `archive/bad-request: at most ${MAX_IDS} ids per call`,
+                };
             }
             if (args.confirm !== true) {
                 return {
@@ -85,9 +107,16 @@ export function toolDefinition(createService, ctx) {
             return { ok: true, action, ...summarizeDelete(result) };
         }
         if (action === 'restore') {
-            const trashIds = strings(args.trashIds, MAX_IDS);
+            const trashIds = strings(args.trashIds);
             if (trashIds.length === 0) {
                 return { ok: false, action, error: 'archive/bad-request: trashIds required' };
+            }
+            if (trashIds.length > MAX_IDS) {
+                return {
+                    ok: false,
+                    action,
+                    error: `archive/bad-request: at most ${MAX_IDS} trashIds per call`,
+                };
             }
             const result = await service.restore({ trashIds });
             return {
@@ -129,11 +158,17 @@ export function toolDefinition(createService, ctx) {
                 trashIds: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Recycle-bin entry ids for `restore`.',
+                    description: 'Recycle-bin entry ids for `restore`. Maximum 100.',
                 },
                 query: { type: 'string', description: 'Filter for `list`.' },
-                offset: { type: 'integer', description: 'Page offset for `list` (default 0).' },
-                limit: { type: 'integer', description: 'Page size for `list` (default 20, max 100).' },
+                offset: {
+                    type: 'integer',
+                    description: 'Page offset for `list` or `trash` (default 0).',
+                },
+                limit: {
+                    type: 'integer',
+                    description: 'Page size for `list` or `trash` (default 20/50, max 100).',
+                },
                 confirm: {
                     type: 'boolean',
                     description: 'Must be true to perform `delete`. Deletion moves sessions to the bin.',

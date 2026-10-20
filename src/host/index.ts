@@ -24,10 +24,12 @@ import { ArchiveDeskError, resolveDshHome } from './paths.ts'
 import {
   ArchiveDeskService,
   type DeleteRequest,
+  type InspectRequest,
   type ListRequest,
   type PurgeRequest,
   type RestoreRequest,
   type SessionQueryLike,
+  type TrashListRequest,
   type WorkspaceRegistryLike,
 } from './service.ts'
 import { toolDefinition } from './tool.ts'
@@ -134,22 +136,68 @@ export function endpointOf(url: string | undefined): string | undefined {
   return endpoint
 }
 
+/** One service per plugin context, so `busy` and the summary cache are shared. */
+const services = new WeakMap<Context, ArchiveDeskService>()
+
 /**
  * Build the service from whatever the Host currently exposes. Every dependency
  * is optional: a profile without `workspaceRegistry` still answers `status` and
  * reports what is missing instead of failing the request.
+ *
+ * The instance is memoized per context. Creating one per request silently
+ * defeated the per-id `busy` guard, because two HTTP calls could each hold a
+ * different instance and race the same session directory.
  */
 export function createService(ctx: Context): ArchiveDeskService {
+  const existing = services.get(ctx)
+  if (existing !== undefined) return existing
+  const service = buildService(ctx)
+  services.set(ctx, service)
+  return service
+}
+
+function hasSession(ctx: Context, service: 'agents' | 'sessions', id: string): boolean {
+  const registry = ctx.get(service) as { get(id: string): unknown } | undefined
+  return registry?.get(id) !== undefined
+}
+
+/** A profile may expose the activity waterfall on a newer/older Cordis shape. */
+async function sessionActivity(ctx: Context, id: string): Promise<boolean> {
+  const host = ctx as unknown as {
+    waterfall?(
+      name: string,
+      payload: { sessionId: string },
+      fallback: () => Promise<readonly unknown[]>,
+    ): Promise<readonly unknown[]>
+  }
+  if (typeof host.waterfall !== 'function') {
+    // Unknown host: fall back to the Agent's own running flag rather than
+    // treating every loaded session as active.
+    const agent = ctx.get('agents') as
+      { get(id: string): { status?: unknown } | undefined } | undefined
+    return agent?.get(id)?.status === 'running'
+  }
+  try {
+    const activity = await host.waterfall('workspace/session-activity', { sessionId: id }, () =>
+      Promise.resolve([]),
+    )
+    return activity.length > 0
+  } catch {
+    // Do not let a delete through when the Host cannot answer.
+    return true
+  }
+}
+
+function buildService(ctx: Context): ArchiveDeskService {
   const registry = ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
   const sessionQuery = ctx.get('sessionQuery') as SessionQueryLike | undefined
-  const agents = ctx.get('agents') as { get(id: string): unknown } | undefined
-  const sessions = ctx.get('sessions') as { get(id: string): unknown } | undefined
 
   return new ArchiveDeskService({
     home: resolveDshHome(),
     registry,
     sessionQuery,
-    isLive: (id) => agents?.get(id) !== undefined || sessions?.get(id) !== undefined,
+    isLoaded: (id) => hasSession(ctx, 'agents', id) || hasSession(ctx, 'sessions', id),
+    isActive: (id) => sessionActivity(ctx, id),
     emitRemoved: (id) => {
       // Declared Host event: `api-session/removed(sessionId)` drops the row
       // from every connected sidebar without waiting for a restart.
@@ -179,8 +227,10 @@ export async function dispatch(ctx: Context, endpoint: string, payload: unknown)
   switch (endpoint) {
     case 'list':
       return service.list((payload ?? {}) as ListRequest)
+    case 'inspect':
+      return service.inspect((payload ?? {}) as InspectRequest)
     case 'listTrash':
-      return service.listTrash()
+      return service.listTrash((payload ?? {}) as TrashListRequest)
     case 'delete':
       return service.delete((payload ?? {}) as DeleteRequest)
     case 'restore':
@@ -224,9 +274,10 @@ export function apply(ctx: Context): void {
 
   boot('apply-start')
 
-  // Finish or undo trash entries interrupted by an earlier crash. Pure
-  // filesystem work, so it does not wait for any Host service.
-  void createService(ctx).recoverTrash()
+  // Finish or undo trash entries interrupted by an earlier crash. This runs
+  // before the first request; using a one-off service keeps the memoized
+  // request service from being built before its Host dependencies exist.
+  void buildService(ctx).recoverTrash()
 
   // Both services are injected: the route needs the server, the handler needs
   // the trust check, and `webServer` alone can activate while `connection` is

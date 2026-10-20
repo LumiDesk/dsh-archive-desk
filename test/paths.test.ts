@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
@@ -10,7 +10,9 @@ import {
   isTrashId,
   isWithin,
   locateSession,
+  measureDirectory,
   resolveDshHome,
+  scanSessionIndex,
 } from '../src/host/paths.ts'
 
 const SESSION_ID = 'session-0dfd3ec8-f8ca-42e2-98aa-35723f06391b'
@@ -61,6 +63,57 @@ test('locateSession finds the session directory in its shard', async (t) => {
 
   assert.equal(await locateSession(join(home, 'sessions'), 'session-missing'), undefined)
   assert.equal(await locateSession(join(home, 'nope'), SESSION_ID), undefined)
+})
+
+test('scanSessionIndex finds every session in one pass', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'archive-desk-index-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const first = join(home, 'sessions', '--a--', SESSION_ID)
+  const second = join(home, 'sessions', '--b--', 'session-aaaaaaaa-0000-4000-8000-000000000000')
+  await mkdir(first, { recursive: true })
+  await mkdir(second, { recursive: true })
+  await writeFile(join(first, 'session.v4.jsonl.zstd'), 'log')
+
+  const index = await scanSessionIndex(join(home, 'sessions'))
+  assert.equal(index.get(SESSION_ID)?.sessionDir, first)
+  assert.equal(index.size, 2)
+  assert.equal((await scanSessionIndex(join(home, 'missing'))).size, 0)
+})
+
+test('scanSessionIndex ignores a symlinked shard', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'archive-desk-index-link-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const outside = join(home, 'outside')
+  const outsideSession = join(outside, SESSION_ID)
+  await mkdir(outsideSession, { recursive: true })
+  await mkdir(join(home, 'sessions'), { recursive: true })
+  try {
+    await symlink(outside, join(home, 'sessions', '--link--'), 'junction')
+  } catch {
+    t.skip('directory symlinks are not available on this host')
+    return
+  }
+
+  assert.equal((await scanSessionIndex(join(home, 'sessions'))).size, 0)
+  assert.equal(await locateSession(join(home, 'sessions'), SESSION_ID), undefined)
+})
+
+test('measureDirectory reports size, mtime and existence', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'archive-desk-measure-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  await writeFile(join(home, 'a.bin'), Buffer.alloc(10))
+
+  const measurement = await measureDirectory(home)
+  assert.equal(measurement.sizeBytes, 10)
+  assert.equal(measurement.exists, true)
+  assert.equal(measurement.mtimeMs > 0, true)
+  assert.deepEqual(await measureDirectory(join(home, 'missing')), {
+    sizeBytes: 0,
+    mtimeMs: 0,
+    exists: false,
+  })
 })
 
 test('directorySize sums nested files', async (t) => {

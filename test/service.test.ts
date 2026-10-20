@@ -79,6 +79,8 @@ test('list describes present and dangling sessions', async (t) => {
 
   assert.equal(result.total, 2)
   assert.equal(result.totalBytes, 42)
+  assert.equal(result.missing, 1)
+  assert.equal(result.missingTotal, 1)
   assert.equal(result.items[0]?.id, PRESENT)
   assert.equal(result.items[0]?.title, '归档清理')
   assert.equal(result.items[0]?.snippet, '帮我把归档对话删掉')
@@ -105,6 +107,11 @@ test('list filters, sorts newest first and paginates', async (t) => {
   assert.equal(page.items.length, 1)
   // Dangling references sort after readable sessions.
   assert.equal(page.items[0]?.id, MISSING)
+
+  const bySize = await service.list({ sort: 'size' })
+  assert.equal(bySize.items[0]?.id, PRESENT)
+  const byTitle = await service.list({ sort: 'title' })
+  assert.equal(byTitle.items[0]?.title, '归档清理')
 })
 
 test('reads titles through readSession and its `session` header shape', async (t) => {
@@ -131,17 +138,71 @@ test('reads titles through readSession and its `session` header shape', async (t
   assert.equal(result.missing, 0)
 })
 
-test('list marks a live session and refuses an oversized page', async (t) => {
+test('a loaded idle session is open, an active one is running', async (t) => {
   const { home } = await fixture()
   t.after(() => rm(home, { recursive: true, force: true }))
 
-  const service = new ArchiveDeskService({
+  const open = new ArchiveDeskService({
     home,
     registry: { archivedSessionIds: [PRESENT], list: () => [] },
-    isLive: () => true,
+    isLoaded: () => true,
+    isActive: async () => false,
   })
+  assert.equal((await open.list()).items[0]?.status, 'open')
 
-  const result = await service.list({ limit: 10_000 })
-  assert.equal(result.items[0]?.status, 'live')
-  assert.equal(result.limit, 100)
+  const running = new ArchiveDeskService({
+    home,
+    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    isLoaded: () => true,
+    isActive: async () => true,
+  })
+  assert.equal((await running.list()).items[0]?.status, 'running')
+})
+
+test('list clamps an oversized page and inspect describes a selection', async (t) => {
+  const { home, service } = await fixture()
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const page = await service.list({ limit: 10_000 })
+  assert.equal(page.limit, 100)
+
+  const inspected = await service.inspect({
+    ids: [PRESENT, MISSING, 'session-99999999-9999-4999-8999-999999999999'],
+  })
+  assert.equal(inspected.total, 2)
+  assert.equal(inspected.missing, 1)
+  assert.equal(inspected.deletable, 2)
+  assert.deepEqual(inspected.notArchived, ['session-99999999-9999-4999-8999-999999999999'])
+})
+
+test('the summary cache is reused across service instances', async (t) => {
+  const { home } = await fixture()
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  let reads = 0
+  const first = new ArchiveDeskService({
+    home,
+    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    sessionQuery: {
+      readSession: async (id: string) => {
+        reads += 1
+        return { session: { id, createdAt: 900 }, events }
+      },
+    },
+  })
+  assert.equal((await first.list()).items[0]?.title, '归档清理')
+  await first.flushCache()
+
+  const second = new ArchiveDeskService({
+    home,
+    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    sessionQuery: {
+      readSession: async () => {
+        reads += 1
+        throw new Error('cache miss')
+      },
+    },
+  })
+  assert.equal((await second.list()).items[0]?.title, '归档清理')
+  assert.equal(reads, 1)
 })

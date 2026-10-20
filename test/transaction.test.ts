@@ -29,7 +29,11 @@ interface FakeWorkspace {
   attachSession(sessionId: string): Promise<void>
 }
 
-function makeRegistry(archived: string[], workspace: FakeWorkspace): WorkspaceRegistryLike {
+function makeRegistry(
+  archived: string[],
+  workspace: FakeWorkspace,
+  failArchive = false,
+): WorkspaceRegistryLike {
   const set = new Set(archived)
   return {
     get archivedSessionIds() {
@@ -40,12 +44,15 @@ function makeRegistry(archived: string[], workspace: FakeWorkspace): WorkspaceRe
       set.delete(sessionId)
     },
     async archiveSession(sessionId) {
+      if (failArchive) throw new Error('registry write failed')
       set.add(sessionId)
     },
   }
 }
 
-async function fixture(options: { live?: boolean } = {}) {
+async function fixture(
+  options: { loaded?: boolean; active?: boolean; failArchive?: boolean } = {},
+) {
   const home = await mkdtemp(join(tmpdir(), 'archive-desk-tx-'))
   const sessionDir = join(home, 'sessions', '--proj--', PRESENT)
   await mkdir(sessionDir, { recursive: true })
@@ -68,7 +75,7 @@ async function fixture(options: { live?: boolean } = {}) {
     },
   }
 
-  const registry = makeRegistry([PRESENT, ABSENT], workspace)
+  const registry = makeRegistry([PRESENT, ABSENT], workspace, options.failArchive === true)
   const removed: string[] = []
   const service = new ArchiveDeskService({
     home,
@@ -89,7 +96,8 @@ async function fixture(options: { live?: boolean } = {}) {
         ],
       }),
     },
-    isLive: () => options.live === true,
+    isLoaded: () => options.loaded === true,
+    isActive: async () => options.active === true,
     emitRemoved: (id) => removed.push(id),
     now: () => NOW,
   })
@@ -104,6 +112,7 @@ test('trash delete moves the session, drops every reference and announces it', a
   const result = await service.delete({ ids: [PRESENT], mode: 'trash' })
 
   assert.deepEqual(result.deleted, [PRESENT])
+  assert.deepEqual(result.partial, [])
   assert.equal(result.freedBytes, 42)
   assert.equal(await exists(sessionDir), false)
   assert.equal(registry.archivedSessionIds.includes(PRESENT), false)
@@ -115,10 +124,10 @@ test('trash delete moves the session, drops every reference and announces it', a
   )
 
   const entries = await service.listTrash()
-  assert.equal(entries.length, 1)
-  assert.equal(entries[0]?.title, TITLED)
-  assert.equal(entries[0]?.sizeBytes, 42)
-  assert.equal(entries[0]?.originalPath, sessionDir)
+  assert.equal(entries.total, 1)
+  assert.equal(entries.items[0]?.title, TITLED)
+  assert.equal(entries.items[0]?.sizeBytes, 42)
+  assert.equal(entries.items[0]?.originalPath, sessionDir)
 })
 
 test('purge delete removes the directory without a bin entry', async (t) => {
@@ -129,26 +138,47 @@ test('purge delete removes the directory without a bin entry', async (t) => {
 
   assert.deepEqual(result.deleted, [PRESENT])
   assert.equal(await exists(sessionDir), false)
-  assert.deepEqual(await service.listTrash(), [])
+  assert.equal((await service.listTrash()).items.length, 0)
 })
 
-test('delete skips live sessions and unarchived ids', async (t) => {
-  const live = await fixture({ live: true })
-  t.after(() => rm(live.home, { recursive: true, force: true }))
+test('delete skips a running session and an open idle one', async (t) => {
+  const running = await fixture({ loaded: true, active: true })
+  t.after(() => rm(running.home, { recursive: true, force: true }))
+  const runningResult = await running.service.delete({ ids: [PRESENT] })
+  assert.deepEqual(runningResult.deleted, [])
+  assert.deepEqual(runningResult.skipped, [{ id: PRESENT, reason: 'archive/live-session' }])
+  assert.equal(await exists(running.sessionDir), true)
 
-  const liveResult = await live.service.delete({ ids: [PRESENT] })
-  assert.deepEqual(liveResult.deleted, [])
-  assert.deepEqual(liveResult.skipped, [{ id: PRESENT, reason: 'archive/live-session' }])
-  assert.equal(await exists(live.sessionDir), true)
+  const open = await fixture({ loaded: true, active: false })
+  t.after(() => rm(open.home, { recursive: true, force: true }))
+  const openResult = await open.service.delete({ ids: [PRESENT] })
+  assert.deepEqual(openResult.deleted, [])
+  assert.deepEqual(openResult.skipped, [{ id: PRESENT, reason: 'archive/open-session' }])
+  assert.equal(await exists(open.sessionDir), true)
+})
 
-  const idle = await fixture()
-  t.after(() => rm(idle.home, { recursive: true, force: true }))
-  const unknownResult = await idle.service.delete({
+test('delete skips unarchived ids and serializes concurrent calls', async (t) => {
+  const { home, service } = await fixture()
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const unknown = await service.delete({
     ids: ['session-55555555-5555-4555-8555-555555555555'],
   })
-  assert.deepEqual(unknownResult.skipped, [
+  assert.deepEqual(unknown.skipped, [
     { id: 'session-55555555-5555-4555-8555-555555555555', reason: 'archive/not-archived' },
   ])
+
+  const [first, second] = await Promise.all([
+    service.delete({ ids: [PRESENT] }),
+    service.delete({ ids: [PRESENT] }),
+  ])
+  const deleted = [...first.deleted, ...second.deleted]
+  const skipped = [...first.skipped, ...second.skipped]
+  assert.deepEqual(deleted, [PRESENT])
+  assert.equal(
+    skipped.some((entry) => entry.reason === 'archive/busy'),
+    true,
+  )
 })
 
 test('restore puts the session back and re-archives it', async (t) => {
@@ -156,7 +186,7 @@ test('restore puts the session back and re-archives it', async (t) => {
   t.after(() => rm(home, { recursive: true, force: true }))
 
   await service.delete({ ids: [PRESENT], mode: 'trash' })
-  const [entry] = await service.listTrash()
+  const [entry] = (await service.listTrash()).items
   assert.ok(entry)
 
   const result = await service.restore({ trashIds: [entry.trashId] })
@@ -165,7 +195,25 @@ test('restore puts the session back and re-archives it', async (t) => {
   assert.equal(await exists(sessionDir), true)
   assert.equal(registry.archivedSessionIds.includes(PRESENT), true)
   assert.deepEqual(workspace.sessionIds, [PRESENT])
-  assert.deepEqual(await service.listTrash(), [])
+  assert.equal((await service.listTrash()).items.length, 0)
+})
+
+test('a failed re-archive rolls the payload back into the bin', async (t) => {
+  const { home, sessionDir, service } = await fixture({ failArchive: true })
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  await service.delete({ ids: [PRESENT], mode: 'trash' })
+  const [entry] = (await service.listTrash()).items
+  assert.ok(entry)
+
+  const result = await service.restore({ trashIds: [entry.trashId] })
+
+  assert.equal(result.restored.length, 0)
+  assert.equal(result.failed[0]?.trashId, entry.trashId)
+  assert.equal(await exists(sessionDir), false)
+  const remaining = await service.listTrash()
+  assert.equal(remaining.items.length, 1)
+  assert.equal(remaining.items[0]?.status, 'ready')
 })
 
 test('emptyTrash purges every entry and reports the freed bytes', async (t) => {
@@ -177,7 +225,7 @@ test('emptyTrash purges every entry and reports the freed bytes', async (t) => {
 
   assert.equal(result.purged.length, 1)
   assert.equal(result.freedBytes, 42)
-  assert.deepEqual(await service.listTrash(), [])
+  assert.equal((await service.listTrash()).items.length, 0)
 })
 
 test('cleanDangling drops references whose directory is gone', async (t) => {

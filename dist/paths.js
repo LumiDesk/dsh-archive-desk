@@ -6,7 +6,7 @@
  *
  * @see docs/设计.md §5.1, §6.1, §10
  */
-import { lstat, readdir, stat } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 /**
@@ -84,6 +84,11 @@ export async function locateSession(root, sessionId) {
         if (!isWithin(root, sessionDir))
             continue;
         try {
+            // The shard itself can be a junction/symlink; checking only the leaf
+            // would follow it out of the sessions root. lstat refuses both.
+            const shardEntry = await lstat(shardDir);
+            if (!shardEntry.isDirectory() || shardEntry.isSymbolicLink())
+                continue;
             const entry = await lstat(sessionDir);
             if (!entry.isDirectory() || entry.isSymbolicLink())
                 continue;
@@ -99,33 +104,116 @@ export async function locateSession(root, sessionId) {
     return matches[0];
 }
 /**
- * Total bytes of one directory tree. Symbolic links are not followed: the log
- * store never contains them, and following one could size an unrelated tree.
+ * Locate every session in one pass.
+ *
+ * The list path used to call {@link locateSession} once per archived id, which
+ * re-read every shard and re-stat every candidate each time. This builds the
+ * whole map from one directory scan instead, so the cost scales with the
+ * number of session directories rather than archived ids × shards.
+ *
+ * Shard and session entries that are symbolic links are skipped: the sessions
+ * root is a trusted local store, and a link there could address a tree outside
+ * it.
+ *
+ * @param root - `<home>/sessions`.
+ * @returns every session id mapped to its directory.
+ * @throws ArchiveDeskError `archive/not-found` when one id appears twice.
  */
-export async function directorySize(dir) {
-    let total = 0;
+export async function scanSessionIndex(root) {
+    const index = new Map();
+    let shards;
+    try {
+        shards = await readdir(root, { withFileTypes: true });
+    }
+    catch {
+        return index;
+    }
+    for (const shard of shards) {
+        if (!shard.isDirectory())
+            continue;
+        const shardDir = join(root, shard.name);
+        if (!isWithin(root, shardDir))
+            continue;
+        try {
+            // Dirent's symlink classification differs for Windows junctions; lstat
+            // is the authoritative check before the shard is followed.
+            const info = await lstat(shardDir);
+            if (!info.isDirectory() || info.isSymbolicLink())
+                continue;
+        }
+        catch {
+            continue;
+        }
+        let entries;
+        try {
+            entries = await readdir(shardDir, { withFileTypes: true });
+        }
+        catch {
+            continue;
+        }
+        for (const entry of entries) {
+            if (!isSessionId(entry.name))
+                continue;
+            const sessionDir = join(shardDir, entry.name);
+            if (!isWithin(root, sessionDir))
+                continue;
+            try {
+                const info = await lstat(sessionDir);
+                if (!info.isDirectory() || info.isSymbolicLink())
+                    continue;
+            }
+            catch {
+                continue;
+            }
+            if (index.has(entry.name)) {
+                throw new ArchiveDeskError('archive/not-found', `session ${JSON.stringify(entry.name)} exists in more than one workspace shard`);
+            }
+            index.set(entry.name, { shardDir, sessionDir });
+        }
+    }
+    return index;
+}
+/**
+ * Size and latest modification time of one directory tree. Symbolic links are
+ * not followed: the log store never contains them, and following one could
+ * size an unrelated tree.
+ */
+export async function measureDirectory(dir) {
+    let sizeBytes = 0;
+    let mtimeMs = 0;
     let entries;
     try {
         entries = await readdir(dir, { withFileTypes: true });
     }
     catch {
-        return 0;
+        return { sizeBytes, mtimeMs, exists: false };
     }
     for (const entry of entries) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
-            total += await directorySize(full);
+            const nested = await measureDirectory(full);
+            sizeBytes += nested.sizeBytes;
+            mtimeMs = Math.max(mtimeMs, nested.mtimeMs);
         }
         else if (entry.isFile()) {
             try {
-                total += (await stat(full)).size;
+                // lstat keeps a symlinked file from sizing an unrelated target.
+                const info = await lstat(full);
+                if (!info.isFile())
+                    continue;
+                sizeBytes += info.size;
+                mtimeMs = Math.max(mtimeMs, info.mtimeMs);
             }
             catch {
                 // A file that vanished mid-scan contributes nothing.
             }
         }
     }
-    return total;
+    return { sizeBytes, mtimeMs, exists: true };
+}
+/** Total bytes of one directory tree. */
+export async function directorySize(dir) {
+    return (await measureDirectory(dir)).sizeBytes;
 }
 /**
  * Fail early when a move would cross volumes: `rename` would throw EXDEV and

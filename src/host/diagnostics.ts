@@ -42,6 +42,8 @@ export const PROBED_AT_BOOT = [
   'tools',
   'workspaceRegistry',
   'sessionQuery',
+  'sessions',
+  'agents',
 ] as const
 
 /** Keep the file small; a runaway activation loop must not grow it forever. */

@@ -1,27 +1,37 @@
 /**
- * Archive desk service: the read path and the delete transaction.
+ * Archive desk service: the read path and the delete/restore transactions.
  *
  * The service depends on narrow interfaces instead of the Host Context, so the
  * whole thing is unit-testable without a running Harness. The Host entry point
  * adapts `ctx` onto these interfaces and exposes the methods over HTTP and to
  * the Agent tool.
  *
+ * Status semantics matter here: "loaded in memory" is not "running". A
+ * conversation open in the main panel but sitting idle is `open`; only the
+ * Host's `workspace/session-activity` waterfall makes a session `running`.
+ *
  * @see docs/设计.md §4.3 (methods), §5.3 (state sources), §6 (transaction)
  */
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { SummaryCache, type SummaryFingerprint, type SummaryRecord } from './cache.ts'
 import {
   ArchiveDeskError,
   archiveDeskRoot,
-  directorySize,
   isSessionId,
   isTrashId,
   locateSession,
+  measureDirectory,
   projectionCacheRoot,
+  scanSessionIndex,
   sessionsRoot,
+  type SessionLocation,
 } from './paths.ts'
-import { TrashStore, type TrashMeta } from './trash.ts'
+import { TrashStore, type TrashEntry, type TrashMeta } from './trash.ts'
+
+/** What the panel and the Agent tool can say about one archived row. */
+export type ArchivedStatus = 'ok' | 'running' | 'open' | 'missing'
 
 /** One row as the panel and the Agent tool see it. */
 export interface ArchivedItem {
@@ -34,13 +44,16 @@ export interface ArchivedItem {
   createdAt: number
   updatedAt: number
   sizeBytes: number
-  status: 'ok' | 'missing' | 'live'
+  status: ArchivedStatus
 }
+
+export type ListSort = 'recent' | 'size' | 'title' | 'archive'
 
 export interface ListRequest {
   offset?: number
   limit?: number
   query?: string
+  sort?: ListSort
 }
 
 export interface ListResult {
@@ -50,9 +63,30 @@ export interface ListResult {
   totalBytes: number
   /** How many of the filtered rows point at a session directory that is gone. */
   missing: number
+  /** Missing rows across the whole archive set, regardless of the search. */
+  missingTotal: number
   /** Every id matching the filter (capped), so "select all" covers all pages. */
   matchingIds: string[]
+  /** Whether {@link matchingIds} was capped. */
+  matchingIdsTruncated: boolean
   items: ArchivedItem[]
+}
+
+export interface InspectRequest {
+  ids?: unknown
+}
+
+export interface InspectResult {
+  items: ArchivedItem[]
+  total: number
+  totalBytes: number
+  /** Rows that can be deleted (including dangling references). */
+  deletable: number
+  running: number
+  open: number
+  missing: number
+  /** Requested ids that are not in the archive set. */
+  notArchived: string[]
 }
 
 export interface DeleteRequest {
@@ -62,6 +96,8 @@ export interface DeleteRequest {
 
 export interface DeleteResult {
   deleted: string[]
+  /** File operation succeeded, but a state write failed; the bin may hold it. */
+  partial: Array<{ id: string; reason: string }>
   skipped: Array<{ id: string; reason: string }>
   freedBytes: number
 }
@@ -81,11 +117,26 @@ export interface PurgeRequest {
 
 export interface PurgeResult {
   purged: string[]
+  failed: Array<{ trashId: string; reason: string }>
   freedBytes: number
+}
+
+export interface TrashListRequest {
+  offset?: number
+  limit?: number
+}
+
+export interface TrashListResult {
+  total: number
+  totalBytes: number
+  offset: number
+  limit: number
+  items: TrashEntry[]
 }
 
 export interface CleanDanglingResult {
   removed: string[]
+  failed: Array<{ id: string; reason: string }>
 }
 
 /** The subset of one session event the listing reads. */
@@ -136,8 +187,10 @@ export interface ArchiveDeskDeps {
   home: string
   registry?: WorkspaceRegistryLike
   sessionQuery?: SessionQueryLike
-  /** Whether a session is attached to a live Agent right now. */
-  isLive?: (sessionId: string) => boolean
+  /** Whether a session is loaded in memory right now (idle included). */
+  isLoaded?: (sessionId: string) => boolean
+  /** Whether the Host reports running work (turn/job/schedule/subagent). */
+  isActive?: (sessionId: string) => Promise<boolean>
   /** Broadcast that a session left the live registry (sidebar row removal). */
   emitRemoved?: (sessionId: string) => void
   /** Injectable clock for deterministic trash ids in tests. */
@@ -146,8 +199,11 @@ export interface ArchiveDeskDeps {
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
+const DEFAULT_TRASH_LIMIT = 50
 const MAX_MATCHING_IDS = 1000
 const SNIPPET_CHARS = 160
+const TITLE_FALLBACK_CHARS = 24
+const SUMMARY_CONCURRENCY = 4
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.trunc(value)))
@@ -165,7 +221,7 @@ function textOf(content: unknown): string | undefined {
   return parts.join(' ').replace(/\s+/g, ' ').trim() || undefined
 }
 
-/** Latest user-sourced message text, used as the row preview. */
+/** First user-authored message text, used as the row preview. */
 export function snippetFromEvents(events: readonly SessionEventLike[]): string {
   for (const event of events) {
     if (event.type !== 'user/message') continue
@@ -221,48 +277,60 @@ function uniqueStrings(value: unknown): string[] {
   return [...new Set(value.filter((entry): entry is string => typeof entry === 'string'))]
 }
 
+function statusRank(status: ArchivedStatus): number {
+  return status === 'missing' ? 1 : 0
+}
+
+interface Row {
+  item: ArchivedItem
+  archiveIndex: number
+}
+
 export class ArchiveDeskService {
   private readonly deps: ArchiveDeskDeps
   private readonly busy = new Set<string>()
+  private readonly summaryCache: SummaryCache
+  private readonly summaryLoads = new Map<string, Promise<SummaryRecord | undefined>>()
   private trashStore: TrashStore | undefined
+  private cacheReady: Promise<void> | undefined
 
   constructor(deps: ArchiveDeskDeps) {
     this.deps = deps
+    this.summaryCache = new SummaryCache(join(archiveDeskRoot(deps.home), 'summaries.json'))
   }
 
   /**
-   * List the archive set, newest activity first.
+   * List the archive set.
    *
-   * A session whose directory is gone still appears, with `status: 'missing'`,
-   * so the panel can offer to drop the dangling reference.
+   * Paths are indexed once, summaries come from the cache when the session
+   * directory is unchanged, and only misses touch the session log.
    */
   async list(request: ListRequest = {}, signal?: AbortSignal): Promise<ListResult> {
+    const archivedIds = this.archivedIds().filter(isSessionId)
     const workspaces = this.workspaces()
-    const items: ArchivedItem[] = []
+    const locations = await this.sessionLocations(archivedIds)
+    const rows = await this.describeMany(archivedIds, locations, workspaces, signal)
 
-    for (const id of this.archivedIds()) {
-      signal?.throwIfAborted()
-      if (!isSessionId(id)) continue
-      items.push(await this.describe(id, workspaces))
-    }
-
+    const missingTotal = rows.filter((row) => row.item.status === 'missing').length
     const filtered =
       request.query === undefined
-        ? items
-        : items.filter((item) => matchesQuery(item, request.query ?? ''))
-    // Dangling references sort last: a row with no log has nothing to preview
-    // and would otherwise push real conversations down the list.
-    filtered.sort((left, right) => {
-      const leftMissing = left.status === 'missing' ? 1 : 0
-      const rightMissing = right.status === 'missing' ? 1 : 0
-      if (leftMissing !== rightMissing) return leftMissing - rightMissing
-      return right.updatedAt - left.updatedAt
-    })
+        ? rows
+        : rows.filter((row) => matchesQuery(row.item, request.query ?? ''))
+
+    const sort: ListSort =
+      request.sort === 'size' || request.sort === 'title' || request.sort === 'archive'
+        ? request.sort
+        : 'recent'
+    filtered.sort((left, right) => compareRows(left, right, sort))
 
     const limit = clamp(request.limit ?? DEFAULT_LIMIT, 1, MAX_LIMIT)
     const offset = Math.max(0, Math.trunc(request.offset ?? 0))
-    const totalBytes = filtered.reduce((sum, item) => sum + item.sizeBytes, 0)
-    const missing = filtered.filter((item) => item.status === 'missing').length
+    const totalBytes = filtered.reduce((sum, row) => sum + row.item.sizeBytes, 0)
+    const missing = filtered.filter((row) => row.item.status === 'missing').length
+    const matchingIds = filtered.slice(0, MAX_MATCHING_IDS).map((row) => row.item.id)
+
+    this.summaryCache.prune(new Set(archivedIds))
+    await this.summaryCache.flush()
 
     return {
       total: filtered.length,
@@ -270,8 +338,40 @@ export class ArchiveDeskService {
       limit,
       totalBytes,
       missing,
-      matchingIds: filtered.slice(0, MAX_MATCHING_IDS).map((item) => item.id),
-      items: filtered.slice(offset, offset + limit),
+      missingTotal,
+      matchingIds,
+      matchingIdsTruncated: filtered.length > MAX_MATCHING_IDS,
+      items: filtered.slice(offset, offset + limit).map((row) => row.item),
+    }
+  }
+
+  /**
+   * Describe a specific selection without listing the whole archive. The
+   * delete dialog uses this so its labels, sizes and skip warnings are exact
+   * even when the selection spans pages.
+   */
+  async inspect(request: InspectRequest = {}): Promise<InspectResult> {
+    const requested = uniqueStrings(request.ids).filter(isSessionId)
+    const archived = new Set(this.archivedIds())
+    const selected = requested.filter((id) => archived.has(id))
+    const notArchived = requested.filter((id) => !archived.has(id))
+    const locations = await this.sessionLocations(selected)
+    const rows = await this.describeMany(selected, locations, this.workspaces())
+    const items = rows.map((row) => row.item)
+    const running = items.filter((item) => item.status === 'running').length
+    const open = items.filter((item) => item.status === 'open').length
+    const missing = items.filter((item) => item.status === 'missing').length
+    await this.summaryCache.flush()
+
+    return {
+      items,
+      total: items.length,
+      totalBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
+      deletable: items.filter((item) => item.status === 'ok' || item.status === 'missing').length,
+      running,
+      open,
+      missing,
+      notArchived,
     }
   }
 
@@ -281,13 +381,15 @@ export class ArchiveDeskService {
    * Order per item: validate → move or remove the directory → drop the
    * projection cache → detach from its workspace → leave the archive set →
    * announce the removal. Files move first so a failed state write leaves a
-   * dangling reference rather than a visible half-deleted session.
+   * dangling reference or a restorable bin entry, never a visible half-deleted
+   * session.
    */
   async delete(request: DeleteRequest): Promise<DeleteResult> {
+    this.requireRegistry()
     const ids = uniqueStrings(request.ids).filter(isSessionId)
     const mode = request.mode === 'purge' ? 'purge' : 'trash'
     const archived = new Set(this.archivedIds())
-    const result: DeleteResult = { deleted: [], skipped: [], freedBytes: 0 }
+    const result: DeleteResult = { deleted: [], partial: [], skipped: [], freedBytes: 0 }
 
     for (const id of ids) {
       if (this.busy.has(id)) {
@@ -298,15 +400,19 @@ export class ArchiveDeskService {
         result.skipped.push({ id, reason: 'archive/not-archived' })
         continue
       }
-      if (this.deps.isLive?.(id) === true) {
-        result.skipped.push({ id, reason: 'archive/live-session' })
-        continue
-      }
 
+      // Claim the id before the first await: the activity check is async, and
+      // two requests arriving together must not both pass the guard.
       this.busy.add(id)
       try {
-        result.freedBytes += await this.deleteOne(id, mode)
-        result.deleted.push(id)
+        await this.assertDeletable(id)
+        const outcome = await this.deleteOne(id, mode)
+        result.freedBytes += outcome.freedBytes
+        if (outcome.partial !== undefined) {
+          result.partial.push({ id, reason: outcome.partial })
+        } else {
+          result.deleted.push(id)
+        }
       } catch (error) {
         result.skipped.push({ id, reason: reasonOf(error) })
       } finally {
@@ -314,18 +420,21 @@ export class ArchiveDeskService {
       }
     }
 
+    await this.summaryCache.flush()
     return result
   }
 
   /** Put trashed sessions back where they came from and re-archive them. */
   async restore(request: RestoreRequest): Promise<RestoreResult> {
+    this.requireRegistry()
     const trashIds = uniqueStrings(request.trashIds).filter(isTrashId)
     const result: RestoreResult = { restored: [], failed: [] }
 
     for (const trashId of trashIds) {
+      let meta: TrashMeta | undefined
       try {
-        const meta = await this.trash().restore(trashId)
-        const workspace = this.workspaces().find((candidate) => samePath(candidate.path, meta.cwd))
+        meta = await this.trash().restore(trashId)
+        const workspace = this.workspaces().find((candidate) => samePath(candidate.path, meta?.cwd))
         if (workspace !== undefined) {
           try {
             await workspace.attachSession?.(meta.sessionId)
@@ -334,7 +443,40 @@ export class ArchiveDeskService {
           }
         }
         await this.deps.registry?.archiveSession(meta.sessionId)
+        // The archive state is committed; a failed discard only leaves a
+        // corrupt bin entry behind, which the panel can still remove.
+        try {
+          await this.trash().discard(trashId)
+        } catch {
+          // Keep the restored result: the session itself is back on disk.
+        }
+        this.summaryCache.delete(meta.sessionId)
         result.restored.push(trashId)
+      } catch (error) {
+        if (meta !== undefined) {
+          try {
+            await this.trash().rollback(trashId, meta)
+          } catch {
+            // The entry stays visible as corrupt if even the rollback failed.
+          }
+        }
+        result.failed.push({ trashId, reason: reasonOf(error) })
+      }
+    }
+
+    await this.summaryCache.flush()
+    return result
+  }
+
+  /** Delete recycle-bin entries for good. */
+  async purgeTrash(request: PurgeRequest): Promise<PurgeResult> {
+    const trashIds = uniqueStrings(request.trashIds).filter(isTrashId)
+    const result: PurgeResult = { purged: [], failed: [], freedBytes: 0 }
+
+    for (const trashId of trashIds) {
+      try {
+        result.freedBytes += await this.trash().purge(trashId)
+        result.purged.push(trashId)
       } catch (error) {
         result.failed.push({ trashId, reason: reasonOf(error) })
       }
@@ -343,57 +485,58 @@ export class ArchiveDeskService {
     return result
   }
 
-  /** Delete recycle-bin entries for good. */
-  async purgeTrash(request: PurgeRequest): Promise<PurgeResult> {
-    const trashIds = uniqueStrings(request.trashIds).filter(isTrashId)
-    const result: PurgeResult = { purged: [], freedBytes: 0 }
-
-    for (const trashId of trashIds) {
-      try {
-        result.freedBytes += await this.trash().purge(trashId)
-        result.purged.push(trashId)
-      } catch {
-        // A missing entry is already gone; nothing to report but the id.
-      }
-    }
-
-    return result
-  }
-
-  /** Empty the recycle bin. */
+  /** Empty the recycle bin, including broken entries. */
   async emptyTrash(): Promise<PurgeResult> {
-    const entries = await this.trash().list()
+    const entries = await this.trash().listEntries()
     return this.purgeTrash({ trashIds: entries.map((entry) => entry.trashId) })
   }
 
-  /** Recycle-bin contents, newest first. */
-  async listTrash(): Promise<TrashMeta[]> {
-    return this.trash().list()
+  /** Recycle-bin contents, newest ready entries first and corrupt entries last. */
+  async listTrash(request: TrashListRequest = {}): Promise<TrashListResult> {
+    const entries = await this.trash().listEntries()
+    const limit = clamp(request.limit ?? DEFAULT_TRASH_LIMIT, 1, MAX_LIMIT)
+    const offset = Math.max(0, Math.trunc(request.offset ?? 0))
+    const totalBytes = entries
+      .filter((entry) => entry.status === 'ready')
+      .reduce((sum, entry) => sum + entry.sizeBytes, 0)
+    const items = entries.slice(offset, offset + limit).map((entry) => {
+      const { meta: _meta, ...publicEntry } = entry
+      return publicEntry
+    })
+
+    return { total: entries.length, totalBytes, offset, limit, items }
   }
 
   /** Drop archive references whose session directory no longer exists. */
   async cleanDangling(): Promise<CleanDanglingResult> {
-    const root = sessionsRoot(this.deps.home)
+    this.requireRegistry()
+    const archivedIds = this.archivedIds().filter(isSessionId)
+    const locations = await this.sessionLocations(archivedIds)
     const removed: string[] = []
+    const failed: Array<{ id: string; reason: string }> = []
 
-    for (const id of this.archivedIds()) {
-      if (!isSessionId(id)) continue
-      const location = await locateSession(root, id)
-      if (location !== undefined) continue
+    for (const id of archivedIds) {
+      if (locations.has(id)) continue
       try {
-        await this.deps.registry?.unarchiveSession(id)
+        await this.forget(id)
         removed.push(id)
-      } catch {
-        // Leave the reference for a later attempt.
+      } catch (error) {
+        failed.push({ id, reason: reasonOf(error) })
       }
     }
 
-    return { removed }
+    await this.summaryCache.flush()
+    return { removed, failed }
   }
 
   /** Finish or undo trash entries interrupted by a crash. Run once at startup. */
   async recoverTrash(): Promise<void> {
     await this.trash().recover()
+  }
+
+  /** Write pending summary-cache changes immediately (tests and shutdown). */
+  async flushCache(): Promise<void> {
+    await this.summaryCache.flush()
   }
 
   private archivedIds(): readonly string[] {
@@ -404,60 +547,242 @@ export class ArchiveDeskService {
     return this.deps.registry?.list() ?? []
   }
 
+  private requireRegistry(): WorkspaceRegistryLike {
+    const registry = this.deps.registry
+    if (registry === undefined) {
+      throw new ArchiveDeskError(
+        'archive/unsupported',
+        'workspaceRegistry is unavailable; destructive operations are disabled',
+      )
+    }
+    return registry
+  }
+
   private trash(): TrashStore {
-    this.trashStore ??= new TrashStore(join(archiveDeskRoot(this.deps.home), 'trash'))
+    this.trashStore ??= new TrashStore(
+      join(archiveDeskRoot(this.deps.home), 'trash'),
+      sessionsRoot(this.deps.home),
+    )
     return this.trashStore
   }
 
-  private async describe(id: string, workspaces: readonly WorkspaceLike[]): Promise<ArchivedItem> {
-    const location = await locateSession(sessionsRoot(this.deps.home), id)
-    const sizeBytes = location === undefined ? 0 : await directorySize(location.sessionDir)
+  /** One directory scan for the whole list, with a slow per-id fallback. */
+  private async sessionLocations(ids: readonly string[]): Promise<Map<string, SessionLocation>> {
+    const root = sessionsRoot(this.deps.home)
+    try {
+      return await scanSessionIndex(root)
+    } catch {
+      // A duplicate id makes the one-pass index ambiguous. Fall back to the
+      // per-id lookup so the rest of the archive still lists.
+    }
 
-    let snapshot: SessionSnapshotLike | undefined
-    const query = this.deps.sessionQuery
-    if (query !== undefined) {
+    const locations = new Map<string, SessionLocation>()
+    for (const id of ids) {
       try {
-        if (typeof query.readSession === 'function') snapshot = await query.readSession(id)
-        else if (typeof query.load === 'function') snapshot = await query.load(id)
+        const location = await locateSession(root, id)
+        if (location !== undefined) locations.set(id, location)
       } catch {
-        // A log that cannot be read costs the preview, not the row.
-        snapshot = undefined
+        // Leave the ambiguous entry out; it shows as missing.
+      }
+    }
+    return locations
+  }
+
+  private async describeMany(
+    ids: readonly string[],
+    locations: Map<string, SessionLocation>,
+    workspaces: readonly WorkspaceLike[],
+    signal?: AbortSignal,
+  ): Promise<Row[]> {
+    await this.ensureCache()
+    const rows: Row[] = new Array(ids.length)
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = cursor
+        cursor += 1
+        if (index >= ids.length) return
+        signal?.throwIfAborted()
+        const id = ids[index]
+        if (id === undefined) return
+        rows[index] = {
+          item: await this.describe(id, locations.get(id), workspaces),
+          archiveIndex: index,
+        }
+      }
+    }
+    const count = Math.min(SUMMARY_CONCURRENCY, Math.max(1, ids.length))
+    await Promise.all(Array.from({ length: count }, () => worker()))
+    return rows.filter((row) => row !== undefined)
+  }
+
+  private async describe(
+    id: string,
+    location: SessionLocation | undefined,
+    workspaces: readonly WorkspaceLike[],
+  ): Promise<ArchivedItem> {
+    const workspace = workspaces.find((candidate) => candidate.sessionIds?.includes(id) === true)
+    const workspaceId = workspace?.id
+    const workspaceTitle = workspace?.title
+
+    if (location === undefined) {
+      return {
+        id,
+        title: id,
+        snippet: '',
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(workspaceTitle === undefined ? {} : { workspaceTitle }),
+        createdAt: 0,
+        updatedAt: 0,
+        sizeBytes: 0,
+        status: 'missing',
       }
     }
 
-    const events = snapshot?.events ?? []
-    // `readSession()` returns the header under `session`; the corpus `load()`
-    // returns it under `header`.
-    const header = snapshot?.header ?? snapshot?.session
-    const createdAt = header?.createdAt ?? 0
-    const workspace = workspaces.find((candidate) => candidate.sessionIds?.includes(id) === true)
-    const snippet = snippetFromEvents(events)
-    const title = titleFromEvents(events) ?? (snippet === '' ? id : snippet.slice(0, 40))
+    const measurement = await measureDirectory(location.sessionDir)
+    if (!measurement.exists) {
+      return {
+        id,
+        title: id,
+        snippet: '',
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        ...(workspaceTitle === undefined ? {} : { workspaceTitle }),
+        createdAt: 0,
+        updatedAt: 0,
+        sizeBytes: 0,
+        status: 'missing',
+      }
+    }
+
+    const fingerprint: SummaryFingerprint = {
+      sizeBytes: measurement.sizeBytes,
+      mtimeMs: measurement.mtimeMs,
+    }
+    let summary = this.summaryCache.get(id, fingerprint)
+    if (summary === undefined) {
+      summary = await this.loadSummary(id, fingerprint)
+      if (summary !== undefined) this.summaryCache.set(summary)
+    }
+
+    const fallback: SummaryRecord = {
+      sessionId: id,
+      fingerprint,
+      title: id,
+      snippet: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const record = summary ?? fallback
+    const status = await this.statusFor(id)
 
     return {
       id,
-      title,
-      snippet,
-      cwd: header?.cwd,
-      workspaceId: workspace?.id,
-      workspaceTitle: workspace?.title,
-      createdAt,
-      updatedAt: updatedAtOf(events, createdAt),
-      sizeBytes,
-      status: location === undefined ? 'missing' : this.deps.isLive?.(id) === true ? 'live' : 'ok',
+      title: record.title,
+      snippet: record.snippet,
+      ...(record.cwd === undefined ? {} : { cwd: record.cwd }),
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+      ...(workspaceTitle === undefined ? {} : { workspaceTitle }),
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      sizeBytes: measurement.sizeBytes,
+      status,
     }
   }
 
-  private async deleteOne(id: string, mode: 'trash' | 'purge'): Promise<number> {
+  private async loadSummary(
+    id: string,
+    fingerprint: SummaryFingerprint,
+  ): Promise<SummaryRecord | undefined> {
+    const current = this.summaryLoads.get(id)
+    if (current !== undefined) return current
+
+    const promise = (async (): Promise<SummaryRecord | undefined> => {
+      const snapshot = await this.readSession(id)
+      if (snapshot === undefined) return undefined
+      const events = snapshot.events ?? []
+      const header = snapshot.header ?? snapshot.session
+      const createdAt = header?.createdAt ?? 0
+      const snippet = snippetFromEvents(events)
+      const title =
+        titleFromEvents(events) ?? (snippet === '' ? id : snippet.slice(0, TITLE_FALLBACK_CHARS))
+      return {
+        sessionId: id,
+        fingerprint,
+        title,
+        snippet,
+        ...(header?.cwd === undefined ? {} : { cwd: header.cwd }),
+        createdAt,
+        updatedAt: updatedAtOf(events, createdAt),
+      }
+    })().finally(() => {
+      this.summaryLoads.delete(id)
+    })
+
+    this.summaryLoads.set(id, promise)
+    return promise
+  }
+
+  private async readSession(id: string): Promise<SessionSnapshotLike | undefined> {
+    const query = this.deps.sessionQuery
+    if (query === undefined) return undefined
+    try {
+      if (typeof query.readSession === 'function') return await query.readSession(id)
+      if (typeof query.load === 'function') return await query.load(id)
+    } catch {
+      // A log that cannot be read costs the preview, not the row.
+    }
+    return undefined
+  }
+
+  private async ensureCache(): Promise<void> {
+    this.cacheReady ??= this.summaryCache.load()
+    await this.cacheReady
+  }
+
+  private async statusFor(id: string): Promise<ArchivedStatus> {
+    if (this.deps.isLoaded?.(id) !== true) return 'ok'
+    return (await this.activityOf(id)) ? 'running' : 'open'
+  }
+
+  private async activityOf(id: string): Promise<boolean> {
+    if (this.deps.isActive === undefined) return false
+    try {
+      return await this.deps.isActive(id)
+    } catch {
+      // If the Host cannot answer, do not let a delete through.
+      return true
+    }
+  }
+
+  private async assertDeletable(id: string): Promise<void> {
+    if (this.deps.isLoaded?.(id) !== true) return
+    if (await this.activityOf(id)) {
+      throw new ArchiveDeskError('archive/live-session', `session ${JSON.stringify(id)} is running`)
+    }
+    throw new ArchiveDeskError(
+      'archive/open-session',
+      `session ${JSON.stringify(id)} is still open; close it before deleting`,
+    )
+  }
+
+  private async deleteOne(
+    id: string,
+    mode: 'trash' | 'purge',
+  ): Promise<{ freedBytes: number; partial?: string }> {
     const location = await locateSession(sessionsRoot(this.deps.home), id)
 
     // Nothing on disk: the reference is the only thing left to drop.
     if (location === undefined) {
+      this.summaryCache.delete(id)
       await this.forget(id)
-      return 0
+      return { freedBytes: 0 }
     }
 
-    const item = await this.describe(id, this.workspaces())
+    // Re-check immediately before touching the directory: a turn may have
+    // started between the batch precheck and this item.
+    await this.assertDeletable(id)
+
+    const item = await this.describe(id, location, this.workspaces())
     if (mode === 'trash') {
       await this.trash().create({
         sessionDir: location.sessionDir,
@@ -477,15 +802,22 @@ export class ArchiveDeskService {
     }
 
     await this.dropProjectionCache(id)
-    await this.forget(id)
-    return item.sizeBytes
+    this.summaryCache.delete(id)
+
+    try {
+      await this.forget(id)
+    } catch (error) {
+      return { freedBytes: item.sizeBytes, partial: reasonOf(error) }
+    }
+    return { freedBytes: item.sizeBytes }
   }
 
   /** Remove every reference the Harness keeps for a deleted session. */
   private async forget(id: string): Promise<void> {
     for (const workspace of this.workspaces()) {
-      if (workspace.sessionIds?.includes(id) !== true) continue
       try {
+        // `sessionIds` is filtered by the registry's candidate check, so a
+        // membership test here would miss stale ids. detach is idempotent.
         await workspace.detachSession?.(id)
       } catch {
         // The registry prunes candidates that no longer resolve on its next write.
@@ -493,14 +825,41 @@ export class ArchiveDeskService {
     }
 
     await this.deps.registry?.unarchiveSession(id)
+    this.summaryCache.delete(id)
     this.deps.emitRemoved?.(id)
   }
 
   private async dropProjectionCache(id: string): Promise<void> {
-    try {
-      await rm(join(projectionCacheRoot(this.deps.home), `${id}.json`), { force: true })
-    } catch {
-      // A derived cache that cannot be removed is invalidated by the log itself.
+    const root = projectionCacheRoot(this.deps.home)
+    // Current DSH writes `session-<id>.json`; older caches used the bare id.
+    // Removing both is cheap and keeps the projection store from carrying a
+    // file for a session that no longer exists.
+    for (const name of [`${id}.json`, `${id.replace(/^session-/, '')}.json`]) {
+      try {
+        await rm(join(root, name), { force: true })
+      } catch {
+        // A derived cache that cannot be removed is invalidated by the log itself.
+      }
     }
+  }
+}
+
+function compareRows(left: Row, right: Row, sort: ListSort): number {
+  const leftMissing = statusRank(left.item.status)
+  const rightMissing = statusRank(right.item.status)
+  if (leftMissing !== rightMissing) return leftMissing - rightMissing
+
+  switch (sort) {
+    case 'size':
+      return (
+        right.item.sizeBytes - left.item.sizeBytes || right.item.updatedAt - left.item.updatedAt
+      )
+    case 'title':
+      return left.item.title.localeCompare(right.item.title)
+    case 'archive':
+      return right.archiveIndex - left.archiveIndex
+    case 'recent':
+    default:
+      return right.item.updatedAt - left.item.updatedAt || right.archiveIndex - left.archiveIndex
   }
 }
