@@ -103,7 +103,32 @@ test('list filters, sorts newest first and paginates', async (t) => {
   const page = await service.list({ offset: 1, limit: 1 })
   assert.equal(page.total, 2)
   assert.equal(page.items.length, 1)
+  // Dangling references sort after readable sessions.
   assert.equal(page.items[0]?.id, MISSING)
+})
+
+test('reads titles through readSession and its `session` header shape', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'archive-desk-service-'))
+  t.after(() => rm(home, { recursive: true, force: true }))
+  await mkdir(join(home, 'sessions', '--proj--', PRESENT), { recursive: true })
+
+  const service = new ArchiveDeskService({
+    home,
+    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    sessionQuery: {
+      readSession: async (id: string) => ({
+        session: { id, createdAt: 900, cwd: 'D:\\Projects\\TestSpace' },
+        events,
+      }),
+    },
+  })
+
+  const result = await service.list()
+  assert.equal(result.items[0]?.title, '归档清理')
+  assert.equal(result.items[0]?.snippet, '帮我把归档对话删掉')
+  assert.equal(result.items[0]?.cwd, 'D:\\Projects\\TestSpace')
+  assert.equal(result.items[0]?.updatedAt, 1_200)
+  assert.equal(result.missing, 0)
 })
 
 test('list marks a live session and refuses an oversized page', async (t) => {

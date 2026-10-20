@@ -268,9 +268,13 @@ export class ArchiveDeskService {
         const location = await locateSession(sessionsRoot(this.deps.home), id);
         const sizeBytes = location === undefined ? 0 : await directorySize(location.sessionDir);
         let snapshot;
-        if (this.deps.sessionQuery !== undefined) {
+        const query = this.deps.sessionQuery;
+        if (query !== undefined) {
             try {
-                snapshot = await this.deps.sessionQuery.load(id);
+                if (typeof query.readSession === 'function')
+                    snapshot = await query.readSession(id);
+                else if (typeof query.load === 'function')
+                    snapshot = await query.load(id);
             }
             catch {
                 // A log that cannot be read costs the preview, not the row.
@@ -278,7 +282,10 @@ export class ArchiveDeskService {
             }
         }
         const events = snapshot?.events ?? [];
-        const createdAt = snapshot?.header?.createdAt ?? 0;
+        // `readSession()` returns the header under `session`; the corpus `load()`
+        // returns it under `header`.
+        const header = snapshot?.header ?? snapshot?.session;
+        const createdAt = header?.createdAt ?? 0;
         const workspace = workspaces.find((candidate) => candidate.sessionIds?.includes(id) === true);
         const snippet = snippetFromEvents(events);
         const title = titleFromEvents(events) ?? (snippet === '' ? id : snippet.slice(0, 40));
@@ -286,7 +293,7 @@ export class ArchiveDeskService {
             id,
             title,
             snippet,
-            cwd: snapshot?.header?.cwd,
+            cwd: header?.cwd,
             workspaceId: workspace?.id,
             workspaceTitle: workspace?.title,
             createdAt,
