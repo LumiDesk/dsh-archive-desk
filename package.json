@@ -49,6 +49,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "release": "node scripts/release.mjs",
     "prepublishOnly": "pnpm build && pnpm test",
     "prepare": "husky"
   },

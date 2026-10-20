@@ -116,6 +116,19 @@ pnpm format
 
 提交走 Conventional Commits，Husky 在 `pre-commit` 跑 lint-staged、在 `commit-msg` 跑 commitlint。
 
+### 发版
+
+```bash
+pnpm release patch          # 0.2.0 → 0.2.1（minor / major / 显式版本号同理）
+pnpm release minor --dry-run
+```
+
+脚本 `scripts/release.mjs` 会依次做：工作区干净检查 → 目标版本未被占用检查 →
+`typecheck` / `lint` / `test` → `npm version`（提交并打 `vX.Y.Z` tag）→ `npm publish` →
+推送提交与 tag → `gh release create --generate-notes`。任何一步失败都会停下并打印回滚命令。
+
+可选参数：`--dry-run`、`--no-checks`、`--no-publish`、`--no-push`、`--no-release`、`--allow-dirty`。
+
 ## 排查
 
 面板不出现时先看 `~/.dsh/archive-desk/last-boot.json`：它按顺序记录 `apply-start` →
