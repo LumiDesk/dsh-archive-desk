@@ -78,7 +78,7 @@ DSH 的 `sessions.get(id)` 只代表「已加载」，不代表「正在运行�
 dsh plugin add dsh-archive-desk
 ```
 
-也可以从本仓库安装：`dsh plugin add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
+也可以从本仓库安装：`dsh plugin add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。**从本地目录安装前先 `pnpm build`**，`dist/` 不入库。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
 
 要求：DSH `0.2.1-rc.2`（本机验收版本）或更高。
 
@@ -143,7 +143,7 @@ src/client/api.ts        HTTP 调用与错误
 src/client/locales.ts    zh/en 字典
 src/client/styles.ts     面板 CSS（主题 token）
 scripts/build-client.mjs 把 Client 打成 __ModuleLoader__ 期望的单文件
-dist/                    构建产物（随仓库提交：本地 link 安装直接读这里）
+dist/                    构建产物（不入库；安装/发布前先 pnpm build）
 docs/设计.md             设计与决策记录
 ```
 

@@ -52,7 +52,7 @@ src/client/locales.ts    zh / en 字典
 src/client/styles.ts     面板 CSS（主题 token）
 scripts/build-client.mjs Client 的 IIFE 打包（primitives 保持 external）
 scripts/release.mjs      发版助手
-dist/                    构建产物，**需要提交**：本地 link 安装直接读它
+dist/                    构建产物，**不入库**：安装/发布前必须 pnpm build
 locale/                  插件目录元数据（zh / en）
 docs/设计.md             设计与决策的唯一来源
 ```
@@ -64,8 +64,8 @@ docs/设计.md             设计与决策的唯一来源
    必须先问。用户明确说"装"之后才装，装完要报告如何卸载。
 2. **不得拿真实会话做破坏性测试。** 会话日志是不可再生数据；需要样本时先复制出测试数据，
    或在用户确认后再操作。
-3. **`dist/` 是提交物。** 改了 `src/` 必须 `pnpm build` 并把 `dist/` 一起提交，否则本地
-   link 安装会加载旧代码。
+3. **`dist/` 是构建产物，不入库。** 改了 `src/` 必须 `pnpm build`；本地 file/link 安装会直接
+   读工作区的 `dist/`，安装前没构建就会加载旧代码。发布由 `prepublishOnly` 重新构建。
 4. **按里程碑提交**，不把一堆改动堆到最后。提交信息用 Conventional Commits
    （`feat:` / `fix:` / `chore:` / `docs:` / `refactor:` / `test:`），Husky 会跑 lint-staged
    和 commitlint。
