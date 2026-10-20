@@ -24,7 +24,11 @@ await build({
   platform: 'browser',
   target: 'es2022',
   jsx: 'automatic',
-  external: ['react', 'react/jsx-runtime'],
+  // The Host serves this file to every page load; keep the plugin small.
+  minify: true,
+  // The page module table provides these; bundling a second copy of React or
+  // the UI primitives would bloat the plugin and break context/theme identity.
+  external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-primitives'],
   legalComments: 'none',
   logLevel: 'info',
   banner: {
