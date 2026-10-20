@@ -1,5 +1,6 @@
 import { PROBED_AT_BOOT, recordBoot } from "./diagnostics.js";
 import { ArchiveDeskError, resolveDshHome } from "./paths.js";
+import { ArchiveDeskService, } from "./service.js";
 /** HTTP prefix this plugin owns. The Client half must use the same string. */
 export const ROUTE_PATH = '/archive-desk';
 /** Loader entry name; also the display key under the Plugin Manager. */
@@ -61,15 +62,35 @@ export function endpointOf(url) {
     return endpoint;
 }
 /**
+ * Build the read service from whatever the Host currently exposes. Every
+ * dependency is optional: a profile without `workspaceRegistry` still answers
+ * `status` and reports what is missing, instead of failing the request.
+ */
+export function createService(ctx) {
+    const registry = ctx.get('workspaceRegistry');
+    const sessionQuery = ctx.get('sessionQuery');
+    const agents = ctx.get('agents');
+    const sessions = ctx.get('sessions');
+    return new ArchiveDeskService({
+        home: resolveDshHome(),
+        registry,
+        sessionQuery,
+        isLive: (id) => agents?.get(id) !== undefined || sessions?.get(id) !== undefined,
+    });
+}
+/**
  * Dispatch one endpoint call. Shared by the HTTP route today and by any future
  * in-process caller (the Agent tool uses the same service behind it).
  */
-export async function dispatch(ctx, endpoint, _payload) {
+export async function dispatch(ctx, endpoint, payload) {
     if (endpoint === 'status') {
         const value = { ok: true, name, capabilities: probeCapabilities(ctx) };
         return value;
     }
-    // TODO(service): list / delete / restore / purgeTrash / emptyTrash / cleanDangling
+    if (endpoint === 'list') {
+        return createService(ctx).list((payload ?? {}));
+    }
+    // TODO(service): delete / restore / purgeTrash / emptyTrash / cleanDangling
     throw new ArchiveDeskError('archive/bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`);
 }
 /**

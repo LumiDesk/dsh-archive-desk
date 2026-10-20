@@ -21,6 +21,12 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { PROBED_AT_BOOT, recordBoot, type BootStage } from './diagnostics.ts'
 import { ArchiveDeskError, resolveDshHome } from './paths.ts'
+import {
+  ArchiveDeskService,
+  type ListRequest,
+  type SessionQueryLike,
+  type WorkspaceRegistryLike,
+} from './service.ts'
 
 /** HTTP prefix this plugin owns. The Client half must use the same string. */
 export const ROUTE_PATH = '/archive-desk'
@@ -125,20 +131,39 @@ export function endpointOf(url: string | undefined): string | undefined {
 }
 
 /**
+ * Build the read service from whatever the Host currently exposes. Every
+ * dependency is optional: a profile without `workspaceRegistry` still answers
+ * `status` and reports what is missing, instead of failing the request.
+ */
+export function createService(ctx: Context): ArchiveDeskService {
+  const registry = ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
+  const sessionQuery = ctx.get('sessionQuery') as SessionQueryLike | undefined
+  const agents = ctx.get('agents') as { get(id: string): unknown } | undefined
+  const sessions = ctx.get('sessions') as { get(id: string): unknown } | undefined
+
+  return new ArchiveDeskService({
+    home: resolveDshHome(),
+    registry,
+    sessionQuery,
+    isLive: (id) => agents?.get(id) !== undefined || sessions?.get(id) !== undefined,
+  })
+}
+
+/**
  * Dispatch one endpoint call. Shared by the HTTP route today and by any future
  * in-process caller (the Agent tool uses the same service behind it).
  */
-export async function dispatch(
-  ctx: Context,
-  endpoint: string,
-  _payload: unknown,
-): Promise<unknown> {
+export async function dispatch(ctx: Context, endpoint: string, payload: unknown): Promise<unknown> {
   if (endpoint === 'status') {
     const value: StatusPayload = { ok: true, name, capabilities: probeCapabilities(ctx) }
     return value
   }
 
-  // TODO(service): list / delete / restore / purgeTrash / emptyTrash / cleanDangling
+  if (endpoint === 'list') {
+    return createService(ctx).list((payload ?? {}) as ListRequest)
+  }
+
+  // TODO(service): delete / restore / purgeTrash / emptyTrash / cleanDangling
   throw new ArchiveDeskError('archive/bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`)
 }
 
