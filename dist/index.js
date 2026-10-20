@@ -62,9 +62,9 @@ export function endpointOf(url) {
     return endpoint;
 }
 /**
- * Build the read service from whatever the Host currently exposes. Every
- * dependency is optional: a profile without `workspaceRegistry` still answers
- * `status` and reports what is missing, instead of failing the request.
+ * Build the service from whatever the Host currently exposes. Every dependency
+ * is optional: a profile without `workspaceRegistry` still answers `status` and
+ * reports what is missing instead of failing the request.
  */
 export function createService(ctx) {
     const registry = ctx.get('workspaceRegistry');
@@ -76,6 +76,17 @@ export function createService(ctx) {
         registry,
         sessionQuery,
         isLive: (id) => agents?.get(id) !== undefined || sessions?.get(id) !== undefined,
+        emitRemoved: (id) => {
+            // Declared Host event: `api-session/removed(sessionId)` drops the row
+            // from every connected sidebar without waiting for a restart.
+            try {
+                ;
+                ctx.emit('api-session/removed', id);
+            }
+            catch {
+                // The next list refresh still converges.
+            }
+        },
     });
 }
 /**
@@ -87,11 +98,25 @@ export async function dispatch(ctx, endpoint, payload) {
         const value = { ok: true, name, capabilities: probeCapabilities(ctx) };
         return value;
     }
-    if (endpoint === 'list') {
-        return createService(ctx).list((payload ?? {}));
+    const service = createService(ctx);
+    switch (endpoint) {
+        case 'list':
+            return service.list((payload ?? {}));
+        case 'listTrash':
+            return service.listTrash();
+        case 'delete':
+            return service.delete((payload ?? {}));
+        case 'restore':
+            return service.restore((payload ?? {}));
+        case 'purgeTrash':
+            return service.purgeTrash((payload ?? {}));
+        case 'emptyTrash':
+            return service.emptyTrash();
+        case 'cleanDangling':
+            return service.cleanDangling();
+        default:
+            throw new ArchiveDeskError('archive/bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`);
     }
-    // TODO(service): delete / restore / purgeTrash / emptyTrash / cleanDangling
-    throw new ArchiveDeskError('archive/bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`);
 }
 /**
  * Register the plugin's Host surface.
@@ -116,6 +141,9 @@ export function apply(ctx) {
         });
     };
     boot('apply-start');
+    // Finish or undo trash entries interrupted by an earlier crash. Pure
+    // filesystem work, so it does not wait for any Host service.
+    void createService(ctx).recoverTrash();
     // Both services are injected: the route needs the server, the handler needs
     // the trust check, and `webServer` alone can activate while `connection` is
     // still booting. Waiting for both removes that ordering window.

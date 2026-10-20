@@ -23,7 +23,10 @@ import { PROBED_AT_BOOT, recordBoot, type BootStage } from './diagnostics.ts'
 import { ArchiveDeskError, resolveDshHome } from './paths.ts'
 import {
   ArchiveDeskService,
+  type DeleteRequest,
   type ListRequest,
+  type PurgeRequest,
+  type RestoreRequest,
   type SessionQueryLike,
   type WorkspaceRegistryLike,
 } from './service.ts'
@@ -131,9 +134,9 @@ export function endpointOf(url: string | undefined): string | undefined {
 }
 
 /**
- * Build the read service from whatever the Host currently exposes. Every
- * dependency is optional: a profile without `workspaceRegistry` still answers
- * `status` and reports what is missing, instead of failing the request.
+ * Build the service from whatever the Host currently exposes. Every dependency
+ * is optional: a profile without `workspaceRegistry` still answers `status` and
+ * reports what is missing instead of failing the request.
  */
 export function createService(ctx: Context): ArchiveDeskService {
   const registry = ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
@@ -146,6 +149,18 @@ export function createService(ctx: Context): ArchiveDeskService {
     registry,
     sessionQuery,
     isLive: (id) => agents?.get(id) !== undefined || sessions?.get(id) !== undefined,
+    emitRemoved: (id) => {
+      // Declared Host event: `api-session/removed(sessionId)` drops the row
+      // from every connected sidebar without waiting for a restart.
+      try {
+        ;(ctx as unknown as { emit(event: string, sessionId: string): void }).emit(
+          'api-session/removed',
+          id,
+        )
+      } catch {
+        // The next list refresh still converges.
+      }
+    },
   })
 }
 
@@ -159,12 +174,28 @@ export async function dispatch(ctx: Context, endpoint: string, payload: unknown)
     return value
   }
 
-  if (endpoint === 'list') {
-    return createService(ctx).list((payload ?? {}) as ListRequest)
+  const service = createService(ctx)
+  switch (endpoint) {
+    case 'list':
+      return service.list((payload ?? {}) as ListRequest)
+    case 'listTrash':
+      return service.listTrash()
+    case 'delete':
+      return service.delete((payload ?? {}) as DeleteRequest)
+    case 'restore':
+      return service.restore((payload ?? {}) as RestoreRequest)
+    case 'purgeTrash':
+      return service.purgeTrash((payload ?? {}) as PurgeRequest)
+    case 'emptyTrash':
+      return service.emptyTrash()
+    case 'cleanDangling':
+      return service.cleanDangling()
+    default:
+      throw new ArchiveDeskError(
+        'archive/bad-request',
+        `unknown endpoint ${JSON.stringify(endpoint)}`,
+      )
   }
-
-  // TODO(service): delete / restore / purgeTrash / emptyTrash / cleanDangling
-  throw new ArchiveDeskError('archive/bad-request', `unknown endpoint ${JSON.stringify(endpoint)}`)
 }
 
 /**
@@ -191,6 +222,10 @@ export function apply(ctx: Context): void {
   }
 
   boot('apply-start')
+
+  // Finish or undo trash entries interrupted by an earlier crash. Pure
+  // filesystem work, so it does not wait for any Host service.
+  void createService(ctx).recoverTrash()
 
   // Both services are injected: the route needs the server, the handler needs
   // the trust check, and `webServer` alone can activate while `connection` is
