@@ -40,6 +40,7 @@
     "build:host": "tsc -p tsconfig.json",
     "build:client": "node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
+    "pretest": "pnpm build",
     "test": "node --test \"test/**/*.test.ts\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
