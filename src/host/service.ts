@@ -48,6 +48,8 @@ export interface ListResult {
   offset: number
   limit: number
   totalBytes: number
+  /** Every id matching the filter (capped), so "select all" covers all pages. */
+  matchingIds: string[]
   items: ArchivedItem[]
 }
 
@@ -134,6 +136,7 @@ export interface ArchiveDeskDeps {
 
 const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 100
+const MAX_MATCHING_IDS = 1000
 const SNIPPET_CHARS = 160
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -248,6 +251,7 @@ export class ArchiveDeskService {
       offset,
       limit,
       totalBytes,
+      matchingIds: filtered.slice(0, MAX_MATCHING_IDS).map((item) => item.id),
       items: filtered.slice(offset, offset + limit),
     }
   }

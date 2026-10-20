@@ -14,6 +14,7 @@ import { ArchiveDeskError, archiveDeskRoot, directorySize, isSessionId, isTrashI
 import { TrashStore } from "./trash.js";
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const MAX_MATCHING_IDS = 1000;
 const SNIPPET_CHARS = 160;
 function clamp(value, minimum, maximum) {
     return Math.min(maximum, Math.max(minimum, Math.trunc(value)));
@@ -126,6 +127,7 @@ export class ArchiveDeskService {
             offset,
             limit,
             totalBytes,
+            matchingIds: filtered.slice(0, MAX_MATCHING_IDS).map((item) => item.id),
             items: filtered.slice(offset, offset + limit),
         };
     }
