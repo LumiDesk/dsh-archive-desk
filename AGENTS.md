@@ -27,7 +27,7 @@
 ```bash
 pnpm install          # 安装依赖，并装好 git hooks
 pnpm build            # host + client 都要构建
-pnpm typecheck        # 两个 tsconfig 都过一遍
+pnpm typecheck        # host / client / test 三个 tsconfig 都过一遍
 pnpm lint             # eslint
 pnpm test             # node --test，会先自动 build
 pnpm format           # prettier --write
@@ -50,6 +50,8 @@ src/client/dialog.tsx    确认弹窗
 src/client/api.ts        HTTP 调用与错误
 src/client/locales.ts    zh / en 字典
 src/client/styles.ts     面板 CSS（主题 token）
+src/client/tsconfig.json 让编辑器按 DOM/JSX 解析 client 文件
+test/tsconfig.json       测试文件的 TS 项目（pnpm typecheck 会跑）
 scripts/build-client.mjs Client 的 IIFE 打包（primitives 保持 external）
 scripts/release.mjs      发版助手
 dist/                    构建产物，**不入库**：安装/发布前必须 pnpm build

@@ -7,31 +7,37 @@ interface Registered {
   id?: string
 }
 
+interface BundleEntry {
+  id: string
+  factory(require: (id: string) => unknown): {
+    inject: string[]
+    apply(ctx: unknown): void
+  }
+}
+
 test('client bundle registers the sidebar entry and the panel', async () => {
   const globals = globalThis as unknown as {
     window?: { __ModuleLoader__: { load(entry: unknown): void } }
   }
 
-  let captured: {
-    id: string
-    factory(require: (id: string) => unknown): {
-      inject: string[]
-      apply(ctx: unknown): void
-    }
-  } | null = null
+  let captured: BundleEntry | null = null
 
   globals.window = {
     __ModuleLoader__: {
       load(entry) {
-        captured = entry as typeof captured
+        captured = entry as BundleEntry
       },
     },
   }
 
-  await import('../dist/client.js')
+  // A computed URL keeps TypeScript from requiring the build output to exist
+  // when `pnpm typecheck` runs on a fresh checkout.
+  await import(new URL('../dist/client.js', import.meta.url).href)
   assert.ok(captured, 'the bundle must call __ModuleLoader__.load')
 
-  const bundle = captured as NonNullable<typeof captured>
+  // The loader calls `load` through a callback, which TS does not track as an
+  // assignment; assert.ok narrows `captured` to null under flow analysis.
+  const bundle = captured as unknown as BundleEntry
   assert.equal(bundle.id, 'dsh-archive-desk')
 
   const plugin = bundle.factory(() => ({}))

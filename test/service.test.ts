@@ -9,6 +9,7 @@ import {
   snippetFromEvents,
   titleFromEvents,
   type SessionEventLike,
+  type WorkspaceLike,
 } from '../src/host/service.ts'
 
 const PRESENT = 'session-11111111-1111-4111-8111-111111111111'
@@ -46,6 +47,23 @@ test('snippet takes the first user-authored text only', () => {
   )
 })
 
+function makeRegistry(
+  archived: string[],
+  workspaces: WorkspaceLike[] = [],
+): {
+  archivedSessionIds: string[]
+  list(): WorkspaceLike[]
+  unarchiveSession(sessionId: string): Promise<void>
+  archiveSession(sessionId: string): Promise<void>
+} {
+  return {
+    archivedSessionIds: archived,
+    list: () => workspaces,
+    async unarchiveSession() {},
+    async archiveSession() {},
+  }
+}
+
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'archive-desk-service-'))
   const sessionDir = join(home, 'sessions', '--proj--', PRESENT)
@@ -54,12 +72,10 @@ async function fixture() {
 
   const service = new ArchiveDeskService({
     home,
-    registry: {
-      archivedSessionIds: [PRESENT, MISSING],
-      list: () => [
-        { id: 'ws-1', title: 'TestSpace', path: 'D:\\Projects\\TestSpace', sessionIds: [PRESENT] },
-      ],
-    },
+    registry: makeRegistry(
+      [PRESENT, MISSING],
+      [{ id: 'ws-1', title: 'TestSpace', path: 'D:\\Projects\\TestSpace', sessionIds: [PRESENT] }],
+    ),
     sessionQuery: {
       load: async (id: string) => {
         if (id !== PRESENT) throw new Error('not found')
@@ -121,7 +137,7 @@ test('reads titles through readSession and its `session` header shape', async (t
 
   const service = new ArchiveDeskService({
     home,
-    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    registry: makeRegistry([PRESENT]),
     sessionQuery: {
       readSession: async (id: string) => ({
         session: { id, createdAt: 900, cwd: 'D:\\Projects\\TestSpace' },
@@ -144,7 +160,7 @@ test('a loaded idle session is open, an active one is running', async (t) => {
 
   const open = new ArchiveDeskService({
     home,
-    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    registry: makeRegistry([PRESENT]),
     isLoaded: () => true,
     isActive: async () => false,
   })
@@ -152,7 +168,7 @@ test('a loaded idle session is open, an active one is running', async (t) => {
 
   const running = new ArchiveDeskService({
     home,
-    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    registry: makeRegistry([PRESENT]),
     isLoaded: () => true,
     isActive: async () => true,
   })
@@ -182,7 +198,7 @@ test('the summary cache is reused across service instances', async (t) => {
   let reads = 0
   const first = new ArchiveDeskService({
     home,
-    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    registry: makeRegistry([PRESENT]),
     sessionQuery: {
       readSession: async (id: string) => {
         reads += 1
@@ -195,7 +211,7 @@ test('the summary cache is reused across service instances', async (t) => {
 
   const second = new ArchiveDeskService({
     home,
-    registry: { archivedSessionIds: [PRESENT], list: () => [] },
+    registry: makeRegistry([PRESENT]),
     sessionQuery: {
       readSession: async () => {
         reads += 1
