@@ -1,6 +1,6 @@
 {
   "name": "dsh-archive-desk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Archived-conversation workspace for DeepSeek Harness: browse, restore, recycle and permanently delete archived sessions.",
   "license": "MIT",
   "author": "Lumi Desk",
