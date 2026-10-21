@@ -47,10 +47,9 @@ DeepSeek Harness（DSH）只提供「归档」：它把会话 id 藏进 `~/.dsh/
 | `失效`   | 归档 id 存在，但 `sessions/` 下找不到目录      | 只能移除归档引用       |
 | 正常     | 目录存在、宿主没有任何活动                     | 是                     |
 
-状态里没有「未关闭」。DSH 的 `sessions.get(id)` 只代表会话加载进了宿主进程内存，而这个注册表是
-进程级的：启动后**看过**的会话会一直留着，归档本身也不卸载会话。所以它既不说明用户还开着它，
-也不说明它还在运行——把它当状态只会让已归档会话莫名其妙变成不可删除。唯一能证明「现在不能删」
-的是 DSH 自己的活动瀑布（turn / job / 定时任务 / 子 Agent）；真有活动时，删除会先把它停掉。
+状态只由 DSH 的 `workspace/session-activity` 决定，它聚合 turn / job / 定时任务 / 子 Agent。`sessions.get(id)`
+只是「加载进了宿主进程内存」：这个注册表是进程级的，启动后看过的会话会一直留着，归档本身也不卸载会话，
+所以它既不代表用户还开着，也不代表在运行。真有活动时，删除会先把它停掉。
 
 ### 删除到底做了什么
 
@@ -67,7 +66,7 @@ DeepSeek Harness（DSH）只提供「归档」：它把会话 id 藏进 `~/.dsh/
 
 ### 性能
 
-列表不再每次请求重读所有日志：
+列表不重读所有日志：
 
 - 一次扫描 `sessions/*` 建立会话路径索引；
 - 列表摘要写入 `~/.dsh/archive-desk/summaries.json`，用「目录大小 + 最新 mtime」做条件缓存；
@@ -84,7 +83,7 @@ dsh plugin add dsh-archive-desk
 
 也可以从本仓库安装：`dsh plugin add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。**从本地目录安装前先 `pnpm build`**，`dist/` 不入库。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
 
-要求：DSH `0.2.1-rc.2`（本机验收版本）或更高。
+依赖 DSH 的 `workspaceRegistry` 与 `workspace/session-activity` 接口；宿主缺少这些接口时，破坏性操作会返回 `archive/unsupported`。
 
 ## 使用
 
@@ -92,8 +91,9 @@ dsh plugin add dsh-archive-desk
 2. 勾选会话 →「删除」→ 选「放入回收站」或「彻底删除」→ 确认；也可以点「取消归档」把它移出归档集合。
 3. 取消归档只改 `archivedSessionIds`，不移动/删除文件；侧栏行会回到原项目。
 4. 已归档会话的「…」菜单里也有「删除」，点了会跳到管理页并弹出同一个确认框。
-5. 顶部横幅会提示有多少条引用已经失效（日志被删但归档 id 还在），点按钮一键清掉。
-6. 回收站里可以单行或批量恢复、彻底删除，也可以清空整个回收站。
+5. 运行中的会话不参与批量勾选；要删它，用它自己的「…」菜单或 Agent 工具，插件会先停止它的工作。
+6. 顶部横幅会提示有多少条引用已经失效（日志被删但归档 id 还在），点按钮一键清掉。
+7. 回收站里可以单行或批量恢复、彻底删除，也可以清空整个回收站。
 
 给 Agent 用：
 
@@ -150,7 +150,7 @@ src/client/locales.ts    zh/en 字典
 src/client/styles.ts     面板 CSS（主题 token）
 scripts/build-client.mjs 把 Client 打成 __ModuleLoader__ 期望的单文件
 dist/                    构建产物（不入库；安装/发布前先 pnpm build）
-docs/设计.md             设计与决策记录
+docs/设计.md             设计与取舍的唯一出处
 ```
 
 ## 开发
@@ -169,7 +169,7 @@ pnpm format
 ### 发版
 
 ```bash
-pnpm release patch          # 1.0.0 → 1.0.1（minor / major / 显式版本号同理）
+pnpm release patch          # 递增补丁版本（minor / major / 显式版本号同理）
 pnpm release minor --dry-run
 ```
 

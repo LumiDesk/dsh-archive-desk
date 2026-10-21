@@ -7,9 +7,9 @@
 `dsh-archive-desk`（归档工作台）是 DeepSeek Harness（DSH）的一个插件：补上「归档」之后缺失的
 查看、恢复、回收站、彻底删除能力，并把同一套能力暴露给 Agent。
 
-当前版本 **1.0.0**：Host 只用 `workspace/session-activity` 判定「运行中」，列表走路径索引 + 摘要缓存；
-Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目，并支持行内/批量的「取消归档」；
-插件**没有配置项**。删除前会先停掉会话残留的活动，因此「加载在内存」不阻止删除。
+Host 只用 `workspace/session-activity` 判定「运行中」，列表走路径索引 + 摘要缓存；Client 基于
+DSH UI primitives 构建，回收站支持分页/批量/损坏条目，并支持行内/批量的「取消归档」；插件
+**没有配置项**。删除前会先停掉会话残留的活动，因此「加载在内存」不阻止删除。
 
 设计与取舍**只有一个出处**：[docs/设计.md](docs/设计.md)。改行为之前先改它。
 
@@ -21,7 +21,7 @@ Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条�
 | Host   | `tsc` → `dist/index.js`（ESM，Node 22+）                                                                                 |
 | Client | `esbuild` → `dist/client.js`（IIFE 包进 `__ModuleLoader__` 工厂，minify）                                                |
 | UI     | `@deepseek-ai/dsh-client-ui-primitives` 作为 external 从页面模块表取，不打包                                             |
-| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖，目前 50 个用例                                                    |
+| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖                                                                    |
 | 规范   | Prettier（无分号、单引号、100 列）、ESLint（typescript-eslint）、Commitlint（Conventional Commits）、Husky + lint-staged |
 
 ```bash
@@ -56,7 +56,7 @@ scripts/build-client.mjs Client 的 IIFE 打包（primitives 保持 external）
 scripts/release.mjs      发版助手
 dist/                    构建产物，**不入库**：安装/发布前必须 pnpm build
 locale/                  插件目录元数据（zh / en）
-docs/设计.md             设计与决策的唯一来源
+docs/设计.md             设计与取舍的唯一出处
 ```
 
 ## 4. 铁律
@@ -107,10 +107,10 @@ docs/设计.md             设计与决策的唯一来源
 6. **发布后切回 npm 版**：先移除 link 开发版，再安装
    `dsh plugin --profile desktop add dsh-archive-desk@<新版本>`。
 
-## 5. 版本对齐
+## 5. 类型包版本
 
-运行时基准是 **DSH 0.2.1-rc.2**。`@deepseek-ai/*` 的 npm `latest` 标签指向旧的
-`0.0.1-rc.1`，安装类型包时必须显式写版本号，否则拿到的是过期类型。
+安装 `@deepseek-ai/*` 类型包时必须显式写版本号：npm 的 `latest` 标签可能指向旧版本，不写就会
+拿到过期类型。版本要与本机 DSH 一致。
 
 ## 6. 必须遵守的接口形状
 
@@ -171,8 +171,8 @@ npm 类型包。`src/client/primitives.d.ts` 只声明实际用到的组件；�
 - `missing`：归档 id 存在但目录不在；
 - `ok`：目录存在、宿主没有活动。
 
-状态里没有「已加载/未关闭」：「加载在内存」是进程级注册表，不是用户可见状态。删除预检和列表状态
-必须用同一个判定（都只看活动瀑布），不要在 Client 里另写一套。
+状态只由活动瀑布决定；「加载在内存」是进程级注册表，不是用户可见状态，不参与判定。删除预检
+和列表状态必须用同一个判定，不要在 Client 里另写一套。
 
 ## 7. 边界
 
