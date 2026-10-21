@@ -3,6 +3,7 @@
 > **Archived-conversation manager for DeepSeek Harness** — browse, restore, recycle, and permanently delete archived sessions.
 
 [![npm](https://img.shields.io/npm/v/dsh-archive-desk.svg?style=flat)](https://www.npmjs.com/package/dsh-archive-desk)
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/lumidesk/dsh-archive-desk)
 [![license](https://img.shields.io/npm/l/dsh-archive-desk.svg?style=flat)](./LICENSE)
 
 ![dsh-archive-desk · 归档工作台](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/social-preview.png)
@@ -84,6 +85,8 @@ dsh plugin --profile web add dsh-archive-desk
 ```
 
 桌面端把 profile 换成 `desktop`：`dsh plugin --profile desktop add dsh-archive-desk`。也可以从本仓库源码安装：`dsh plugin --profile web add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。**从本地目录安装前先 `pnpm build`**，`dist/` 不入库。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
+
+插件已收录在 [dsh-plugin.org 插件市场](https://dsh-plugin.org/plugins/lumidesk/dsh-archive-desk)，条目里的安装命令与上面一致。
 
 依赖 DSH 的 `workspaceRegistry` 与 `workspace/session-activity` 接口；宿主缺少这些接口时，破坏性操作会返回 `archive/unsupported`。
 
