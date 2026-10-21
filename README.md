@@ -13,6 +13,8 @@ DeepSeek Harness（DSH）只提供「归档」：它把会话 id 藏进 `~/.dsh/
 
 侧栏点「归档工作台」进入整页管理：「已归档」与「回收站」两个页签，支持按标题 / 摘要 / 项目搜索、排序、分页、多选与批量删除；删除默认进回收站，彻底删除要显式选择 + 知情确认。列表首次加载显示骨架屏，刷新时保留旧数据。
 
+![归档工作台 · 已归档列表](https://raw.githubusercontent.com/LumiDesk/dsh-archive-desk/main/docs/assets/panel.png)
+
 ## 为什么需要它
 
 | 不装插件                                                                 | 装上之后                                              |
@@ -77,11 +79,11 @@ DeepSeek Harness（DSH）只提供「归档」：它把会话 id 藏进 `~/.dsh/
 ## 安装
 
 ```bash
-# 在 DSH 的 profile 里安装（dsh 会把参数转发给 pnpm）
-dsh plugin add dsh-archive-desk
+# npm 包（推荐）：装进 web profile（dsh 会把参数转发给 pnpm）
+dsh plugin --profile web add dsh-archive-desk
 ```
 
-也可以从本仓库安装：`dsh plugin add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。**从本地目录安装前先 `pnpm build`**，`dist/` 不入库。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
+桌面端把 profile 换成 `desktop`：`dsh plugin --profile desktop add dsh-archive-desk`。也可以从本仓库源码安装：`dsh plugin --profile web add github:LumiDesk/dsh-archive-desk`，或在 DSH 里用 `plugin_manager` 的 `install_bundle` 指向本地目录。**从本地目录安装前先 `pnpm build`**，`dist/` 不入库。安装后出现在「设置 → 插件」，侧栏出现「归档工作台」图标。
 
 依赖 DSH 的 `workspaceRegistry` 与 `workspace/session-activity` 接口；宿主缺少这些接口时，破坏性操作会返回 `archive/unsupported`。
 
@@ -116,6 +118,19 @@ dsh plugin add dsh-archive-desk
 - 摘要长度、批量上限、回收站分页等是代码常量，不是部署旋钮。
 
 理由很简单：归档管理工具的安全边界应该由代码固定，而不是让用户或部署者去调一个可能被误改的开关。
+
+## 权限与安全
+
+插件是本地用户态工具：没有账号、没有网络请求、没有遥测。
+
+| 范围                   | 行为                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `~/.dsh/sessions/*`    | 读取标题 / 摘要 / 时间 / 体积；删除时把会话目录移入回收站或移除                |
+| `~/.dsh/storages/`     | 只通过 DSH 注册表 API 增删归档 id 与 workspace 成员，不直接改 `workspace.json` |
+| `~/.dsh/archive-desk/` | 写回收站、摘要缓存（`summaries.json`）与启动诊断（`last-boot.json`）           |
+| `~/.dsh/attachments`   | 不读写（内容寻址、跨会话共享）                                                 |
+
+破坏性操作一律要人工确认：删除默认进回收站，彻底删除必须主动切换并勾选「不可恢复」；Agent 工具只能删到回收站。
 
 ## 技术栈
 
