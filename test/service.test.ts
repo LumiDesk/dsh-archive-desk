@@ -162,25 +162,36 @@ test('reads titles through readSession and its `session` header shape', async (t
   assert.equal(result.missing, 0)
 })
 
-test('a loaded idle session is open, an active one is running', async (t) => {
+test('only in-flight work makes a row running; being loaded is not a status', async (t) => {
   const { home } = await fixture()
   t.after(() => rm(home, { recursive: true, force: true }))
 
-  const open = new ArchiveDeskService({
+  // A session the Host still holds in memory reports no activity. That used to
+  // render as "open" and block deletion forever; it is now a plain deletable
+  // row, because "loaded" says nothing about what the user sees.
+  const idle = new ArchiveDeskService({
     home,
     registry: makeRegistry([PRESENT]),
-    isLoaded: () => true,
     isActive: async () => false,
   })
-  assert.equal((await open.list()).items[0]?.status, 'open')
+  assert.equal((await idle.list()).items[0]?.status, 'ok')
 
   const running = new ArchiveDeskService({
     home,
     registry: makeRegistry([PRESENT]),
-    isLoaded: () => true,
     isActive: async () => true,
   })
   assert.equal((await running.list()).items[0]?.status, 'running')
+
+  // An unknown Host (activity probe throws) must not be read as idle.
+  const unknown = new ArchiveDeskService({
+    home,
+    registry: makeRegistry([PRESENT]),
+    isActive: async () => {
+      throw new Error('no waterfall')
+    },
+  })
+  assert.equal((await unknown.list()).items[0]?.status, 'running')
 })
 
 test('list clamps an oversized page and inspect describes a selection', async (t) => {
@@ -195,6 +206,8 @@ test('list clamps an oversized page and inspect describes a selection', async (t
   })
   assert.equal(inspected.total, 2)
   assert.equal(inspected.missing, 1)
+  assert.equal(inspected.running, 0)
+  assert.equal(inspected.notSettled, 0)
   assert.equal(inspected.deletable, 2)
   assert.deepEqual(inspected.notArchived, ['session-99999999-9999-4999-8999-999999999999'])
 })

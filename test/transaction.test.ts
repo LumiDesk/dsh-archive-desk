@@ -51,7 +51,14 @@ function makeRegistry(
 }
 
 async function fixture(
-  options: { loaded?: boolean; active?: boolean; failArchive?: boolean } = {},
+  options: {
+    /** Whether the activity waterfall reports work; a function can flip it. */
+    active?: boolean | (() => boolean)
+    /** Runs when the service asks the Host to stop activity. */
+    onStop?: () => void
+    failArchive?: boolean
+    settleTimeoutMs?: number
+  } = {},
 ) {
   const home = await mkdtemp(join(tmpdir(), 'archive-desk-tx-'))
   const sessionDir = join(home, 'sessions', '--proj--', PRESENT)
@@ -77,6 +84,7 @@ async function fixture(
 
   const registry = makeRegistry([PRESENT, ABSENT], workspace, options.failArchive === true)
   const removed: string[] = []
+  const stopped: string[] = []
   const service = new ArchiveDeskService({
     home,
     registry,
@@ -96,13 +104,19 @@ async function fixture(
         ],
       }),
     },
-    isLoaded: () => options.loaded === true,
-    isActive: async () => options.active === true,
+    isActive: async () =>
+      typeof options.active === 'function' ? options.active() : options.active === true,
+    stopActivity: (id) => {
+      stopped.push(id)
+      options.onStop?.()
+    },
+    wait: async () => undefined,
+    ...(options.settleTimeoutMs === undefined ? {} : { settleTimeoutMs: options.settleTimeoutMs }),
     emitRemoved: (id) => removed.push(id),
     now: () => NOW,
   })
 
-  return { home, sessionDir, workspace, registry, removed, service }
+  return { home, sessionDir, workspace, registry, removed, stopped, service }
 }
 
 test('trash delete moves the session, drops every reference and announces it', async (t) => {
@@ -141,20 +155,36 @@ test('purge delete removes the directory without a bin entry', async (t) => {
   assert.equal((await service.listTrash()).items.length, 0)
 })
 
-test('delete skips a running session and an open idle one', async (t) => {
-  const running = await fixture({ loaded: true, active: true })
-  t.after(() => rm(running.home, { recursive: true, force: true }))
-  const runningResult = await running.service.delete({ ids: [PRESENT] })
-  assert.deepEqual(runningResult.deleted, [])
-  assert.deepEqual(runningResult.skipped, [{ id: PRESENT, reason: 'archive/live-session' }])
-  assert.equal(await exists(running.sessionDir), true)
+test('delete stops in-flight work, then removes the session', async (t) => {
+  let active = 1
+  const { home, sessionDir, stopped, service } = await fixture({
+    active: () => active > 0,
+    onStop: () => {
+      active = 0
+    },
+  })
+  t.after(() => rm(home, { recursive: true, force: true }))
 
-  const open = await fixture({ loaded: true, active: false })
-  t.after(() => rm(open.home, { recursive: true, force: true }))
-  const openResult = await open.service.delete({ ids: [PRESENT] })
-  assert.deepEqual(openResult.deleted, [])
-  assert.deepEqual(openResult.skipped, [{ id: PRESENT, reason: 'archive/open-session' }])
-  assert.equal(await exists(open.sessionDir), true)
+  const result = await service.delete({ ids: [PRESENT], mode: 'trash' })
+
+  assert.deepEqual(result.deleted, [PRESENT])
+  assert.deepEqual(result.skipped, [])
+  assert.deepEqual(stopped, [PRESENT])
+  assert.equal(await exists(sessionDir), false)
+})
+
+test('delete skips a session whose activity never settles', async (t) => {
+  const { home, sessionDir, service } = await fixture({
+    active: true,
+    settleTimeoutMs: 0,
+  })
+  t.after(() => rm(home, { recursive: true, force: true }))
+
+  const result = await service.delete({ ids: [PRESENT] })
+
+  assert.deepEqual(result.deleted, [])
+  assert.deepEqual(result.skipped, [{ id: PRESENT, reason: 'archive/busy' }])
+  assert.equal(await exists(sessionDir), true)
 })
 
 test('delete skips unarchived ids and serializes concurrent calls', async (t) => {
