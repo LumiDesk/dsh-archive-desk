@@ -75,16 +75,6 @@ function StatusBadge({ item, t }: { item: ArchivedItem; t: Translate }) {
       </Tooltip>
     )
   }
-  if (item.status === 'open') {
-    return (
-      <Tooltip label={t('status.tooltip.open')} side="bottom">
-        <span className="adk-status" data-status="open">
-          <StateDot state="idle" />
-          {t('status.open')}
-        </span>
-      </Tooltip>
-    )
-  }
   if (item.status === 'missing') {
     return (
       <Tooltip label={t('status.tooltip.missing')} side="bottom">
@@ -902,9 +892,7 @@ export function ArchiveDeskPage({ t }: { t: Translate }) {
                             title={
                               item.status === 'running'
                                 ? t('status.tooltip.running')
-                                : item.status === 'open'
-                                  ? t('status.tooltip.open')
-                                  : t('select.allPage')
+                                : t('select.allPage')
                             }
                             onChange={() => toggleItem(item)}
                           />

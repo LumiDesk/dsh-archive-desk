@@ -6,11 +6,18 @@
  * adapts `ctx` onto these interfaces and exposes the methods over HTTP and to
  * the Agent tool.
  *
- * Status semantics matter here: "loaded in memory" is not "running". A
- * conversation open in the main panel but sitting idle is `open`; only the
- * Host's `workspace/session-activity` waterfall makes a session `running`.
+ * Status semantics matter here. Only the Host's `workspace/session-activity`
+ * waterfall can prove a session has work in flight (turn, job, schedule,
+ * subagent). "Loaded in memory" is deliberately *not* a status: the Host keeps
+ * every session it has seen for the process lifetime, so it says nothing about
+ * whether the user still has it open, and archiving never unloads a session.
+ * Treating it as "still open" made archived conversations permanently
+ * undeletable for no reason the user could act on.
  *
- * @see docs/设计.md §4.3 (methods), §5.3 (state sources), §6 (transaction)
+ * A loaded-but-idle session is deletable; the delete path stops any residual
+ * activity first (§6.2 step 0) so nothing can write the log back afterwards.
+ *
+ * @see docs/设计.md §3.1 (states), §5.3 (state sources), §6 (transaction)
  */
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -31,7 +38,7 @@ import {
 import { TrashStore, type TrashEntry, type TrashMeta } from './trash.ts'
 
 /** What the panel and the Agent tool can say about one archived row. */
-export type ArchivedStatus = 'ok' | 'running' | 'open' | 'missing'
+export type ArchivedStatus = 'ok' | 'running' | 'missing'
 
 /** One row as the panel and the Agent tool see it. */
 export interface ArchivedItem {
@@ -80,10 +87,15 @@ export interface InspectResult {
   items: ArchivedItem[]
   total: number
   totalBytes: number
-  /** Rows that can be deleted (including dangling references). */
+  /**
+   * Rows a delete can act on. Running rows count: the delete path stops their
+   * work first, so they are delayed rather than refused.
+   */
   deletable: number
+  /** Rows with activity in flight; deleting them means stopping that work first. */
   running: number
-  open: number
+  /** Rows whose activity did not stop in time; the delete run skips them. */
+  notSettled: number
   missing: number
   /** Requested ids that are not in the archive set. */
   notArchived: string[]
@@ -196,14 +208,22 @@ export interface ArchiveDeskDeps {
   home: string
   registry?: WorkspaceRegistryLike
   sessionQuery?: SessionQueryLike
-  /** Whether a session is loaded in memory right now (idle included). */
-  isLoaded?: (sessionId: string) => boolean
   /** Whether the Host reports running work (turn/job/schedule/subagent). */
   isActive?: (sessionId: string) => Promise<boolean>
+  /**
+   * Ask the Host to stop a session's work the way archiving does
+   * (`workspace/session-stop`): cancel the turn without keeping its inbox, kill
+   * its jobs, drop its schedules and cancel its subagents.
+   */
+  stopActivity?: (sessionId: string) => void
   /** Broadcast that a session left the live registry (sidebar row removal). */
   emitRemoved?: (sessionId: string) => void
   /** Injectable clock for deterministic trash ids in tests. */
   now?: () => Date
+  /** Injectable sleep so the "activity stopped" poll is testable. */
+  wait?: (ms: number) => Promise<void>
+  /** How long to wait for stopped activity to disappear before giving up. */
+  settleTimeoutMs?: number
 }
 
 const DEFAULT_LIMIT = 20
@@ -213,6 +233,10 @@ const MAX_MATCHING_IDS = 1000
 const SNIPPET_CHARS = 160
 const TITLE_FALLBACK_CHARS = 24
 const SUMMARY_CONCURRENCY = 4
+/** How long `delete` waits for stopped work to report idle, in total. */
+const DEFAULT_SETTLE_TIMEOUT_MS = 2000
+/** Gap between two activity probes while waiting for a stopped session. */
+const SETTLE_POLL_MS = 50
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.trunc(value)))
@@ -368,7 +392,6 @@ export class ArchiveDeskService {
     const rows = await this.describeMany(selected, locations, this.workspaces())
     const items = rows.map((row) => row.item)
     const running = items.filter((item) => item.status === 'running').length
-    const open = items.filter((item) => item.status === 'open').length
     const missing = items.filter((item) => item.status === 'missing').length
     await this.summaryCache.flush()
 
@@ -376,9 +399,11 @@ export class ArchiveDeskService {
       items,
       total: items.length,
       totalBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
-      deletable: items.filter((item) => item.status === 'ok' || item.status === 'missing').length,
+      // Every listed row is actionable: idle and dangling ones directly, running
+      // ones after their activity is stopped. Only a failed stop skips a row.
+      deletable: items.length,
       running,
-      open,
+      notSettled: 0,
       missing,
       notArchived,
     }
@@ -459,7 +484,7 @@ export class ArchiveDeskService {
       // two requests arriving together must not both pass the guard.
       this.busy.add(id)
       try {
-        await this.assertDeletable(id)
+        await this.assertIdle(id)
         const outcome = await this.deleteOne(id, mode)
         result.freedBytes += outcome.freedBytes
         if (outcome.partial !== undefined) {
@@ -812,8 +837,7 @@ export class ArchiveDeskService {
   }
 
   private async statusFor(id: string): Promise<ArchivedStatus> {
-    if (this.deps.isLoaded?.(id) !== true) return 'ok'
-    return (await this.activityOf(id)) ? 'running' : 'open'
+    return (await this.activityOf(id)) ? 'running' : 'ok'
   }
 
   private async activityOf(id: string): Promise<boolean> {
@@ -826,15 +850,30 @@ export class ArchiveDeskService {
     }
   }
 
-  private async assertDeletable(id: string): Promise<void> {
-    if (this.deps.isLoaded?.(id) !== true) return
-    if (await this.activityOf(id)) {
-      throw new ArchiveDeskError('archive/live-session', `session ${JSON.stringify(id)} is running`)
+  /**
+   * Make sure a session has no work in flight before its directory is touched.
+   *
+   * Activity is stopped first (the same `workspace/session-stop` archiving
+   * uses), then polled until it disappears. A session that is merely loaded in
+   * memory has no activity and passes immediately; one that is really running
+   * either settles here or is skipped with `archive/busy`.
+   */
+  private async assertIdle(id: string): Promise<void> {
+    if (!(await this.activityOf(id))) return
+    this.deps.stopActivity?.(id)
+    const wait =
+      this.deps.wait ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
+    const deadline = Date.now() + (this.deps.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS)
+    for (;;) {
+      await wait(SETTLE_POLL_MS)
+      if (!(await this.activityOf(id))) return
+      if (Date.now() >= deadline) {
+        throw new ArchiveDeskError(
+          'archive/busy',
+          `session ${JSON.stringify(id)} did not stop its activity in time; try again once it ends`,
+        )
+      }
     }
-    throw new ArchiveDeskError(
-      'archive/open-session',
-      `session ${JSON.stringify(id)} is still open; close it before deleting`,
-    )
   }
 
   private async deleteOne(
@@ -852,7 +891,7 @@ export class ArchiveDeskService {
 
     // Re-check immediately before touching the directory: a turn may have
     // started between the batch precheck and this item.
-    await this.assertDeletable(id)
+    await this.assertIdle(id)
 
     const item = await this.describe(id, location, this.workspaces())
     if (mode === 'trash') {

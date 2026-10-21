@@ -58,7 +58,8 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       : t('confirm.purgeBody')
 
   const items = isDelete ? (preview?.items ?? []) : []
-  const skipped = isDelete ? (preview?.running ?? 0) + (preview?.open ?? 0) : 0
+  const running = isDelete ? (preview?.running ?? 0) : 0
+  const notSettled = isDelete ? (preview?.notSettled ?? 0) : 0
   const notArchived = isDelete ? (preview?.notArchived.length ?? 0) : 0
   const checking = isDelete && previewLoading
   const canConfirm =
@@ -139,12 +140,14 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
           </>
         )}
 
-        {skipped > 0 && (
+        {running > 0 && (
           <div className="adk-alert" data-tone="warn">
-            {t('confirm.skipped', {
-              running: preview?.running ?? 0,
-              open: preview?.open ?? 0,
-            })}
+            {t('confirm.skipped', { running })}
+          </div>
+        )}
+        {notSettled > 0 && (
+          <div className="adk-alert" data-tone="warn">
+            {t('confirm.notSettled', { count: notSettled })}
           </div>
         )}
         {notArchived > 0 && (

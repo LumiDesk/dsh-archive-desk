@@ -3,7 +3,6 @@ import type { Translate } from './locales'
 
 const ERROR_KEYS: Record<string, string> = {
   'archive/live-session': 'error.archive/live-session',
-  'archive/open-session': 'error.archive/open-session',
   'archive/not-archived': 'error.archive/not-archived',
   'archive/busy': 'error.archive/busy',
   'archive/not-found': 'error.archive/not-found',

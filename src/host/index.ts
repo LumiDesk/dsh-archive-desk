@@ -157,12 +157,14 @@ export function createService(ctx: Context): ArchiveDeskService {
   return service
 }
 
-function hasSession(ctx: Context, service: 'agents' | 'sessions', id: string): boolean {
-  const registry = ctx.get(service) as { get(id: string): unknown } | undefined
-  return registry?.get(id) !== undefined
-}
-
-/** A profile may expose the activity waterfall on a newer/older Cordis shape. */
+/**
+ * Whether the Host reports work in flight for one session.
+ *
+ * This is the only signal that may block a delete. "Loaded in memory" is not
+ * one: the Host keeps every session it has seen for the process lifetime, and
+ * archiving never unloads a session, so a loaded-but-idle archived row would
+ * otherwise be undeletable forever with no action the user could take.
+ */
 async function sessionActivity(ctx: Context, id: string): Promise<boolean> {
   const host = ctx as unknown as {
     waterfall?(
@@ -189,6 +191,26 @@ async function sessionActivity(ctx: Context, id: string): Promise<boolean> {
   }
 }
 
+/**
+ * Ask the Host to stop one session's work the way its own archiving does.
+ *
+ * `workspace/session-stop` is a declared Host event with per-family providers:
+ * the Agent cancels a running turn (without keeping its inbox), the job seam
+ * kills the session's jobs, the schedule seam deletes its stored tasks, and the
+ * subagent runtime cancels its descendants. Emitted before a delete so nothing
+ * can wake the session and write its log back after the directory is gone.
+ */
+function stopSessionActivity(ctx: Context, id: string): void {
+  try {
+    ;(ctx as unknown as { emit(event: string, payload: unknown): void }).emit(
+      'workspace/session-stop',
+      { sessionId: id },
+    )
+  } catch {
+    // A Host without the stop seam still lets the activity poll decide.
+  }
+}
+
 function buildService(ctx: Context): ArchiveDeskService {
   const registry = ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
   const sessionQuery = ctx.get('sessionQuery') as SessionQueryLike | undefined
@@ -197,8 +219,8 @@ function buildService(ctx: Context): ArchiveDeskService {
     home: resolveDshHome(),
     registry,
     sessionQuery,
-    isLoaded: (id) => hasSession(ctx, 'agents', id) || hasSession(ctx, 'sessions', id),
     isActive: (id) => sessionActivity(ctx, id),
+    stopActivity: (id) => stopSessionActivity(ctx, id),
     emitRemoved: (id) => {
       // Declared Host event: `api-session/removed(sessionId)` drops the row
       // from every connected sidebar without waiting for a restart.

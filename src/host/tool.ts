@@ -19,7 +19,7 @@ const MAX_IDS = 100
 
 const TOOL_DESCRIPTION = [
   'List, unarchive, delete (into the recycle bin) or restore archived DeepSeek Harness',
-  'conversations. Actions: list (newest first, with title/preview/size and running/open state),',
+  'conversations. Actions: list (newest first, with title/preview/size and running state),',
   'unarchive (archived ids -> the normal workspace, files untouched), delete (archived ids ->',
   'recycle bin; requires confirm:true), restore (recycle-bin trashIds back to the archive), trash',
   '(page through the bin). Permanent deletion is not available through this tool; ask the user to',

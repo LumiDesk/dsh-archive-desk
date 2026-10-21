@@ -24,7 +24,6 @@ export type ArchiveDeskErrorCode =
   | 'archive/bad-request'
   | 'archive/not-archived'
   | 'archive/live-session'
-  | 'archive/open-session'
   | 'archive/busy'
   | 'archive/not-found'
   | 'archive/restore-conflict'

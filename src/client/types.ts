@@ -1,6 +1,6 @@
 /** Wire types shared by the panel and the plugin's HTTP endpoints. */
 
-export type ArchivedStatus = 'ok' | 'running' | 'open' | 'missing'
+export type ArchivedStatus = 'ok' | 'running' | 'missing'
 
 export interface ArchivedItem {
   id: string
@@ -38,7 +38,7 @@ export interface InspectResult {
   totalBytes: number
   deletable: number
   running: number
-  open: number
+  notSettled: number
   missing: number
   notArchived: string[]
 }

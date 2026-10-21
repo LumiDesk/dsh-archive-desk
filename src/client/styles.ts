@@ -249,7 +249,6 @@ export const STYLES = `
   white-space: nowrap;
 }
 .adk-status[data-status="running"] { color: var(--dsw-alias-state-warn-primary); }
-.adk-status[data-status="open"] { color: var(--dsw-alias-label-tertiary); }
 .adk-status[data-status="missing"] { color: var(--dsw-alias-state-error-primary); }
 .adk-trash-head,
 .adk-trash-row {
