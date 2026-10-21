@@ -7,9 +7,9 @@
 `dsh-archive-desk`（归档工作台）是 DeepSeek Harness（DSH）的一个插件：补上「归档」之后缺失的
 查看、恢复、回收站、彻底删除能力，并把同一套能力暴露给 Agent。
 
-当前版本 **1.0.0**：Host 用 `workspace/session-activity` 区分「运行中」与「已加载但空闲」，
-列表走路径索引 + 摘要缓存；Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目，
-并支持行内/批量的「取消归档」；插件**没有配置项**。
+当前版本 **1.0.0**：Host 只用 `workspace/session-activity` 判定「运行中」，列表走路径索引 + 摘要缓存；
+Client 基于 DSH UI primitives 重做，回收站支持分页/批量/损坏条目，并支持行内/批量的「取消归档」；
+插件**没有配置项**。删除前会先停掉会话残留的活动，因此「加载在内存」不阻止删除。
 
 设计与取舍**只有一个出处**：[docs/设计.md](docs/设计.md)。改行为之前先改它。
 
@@ -21,7 +21,7 @@
 | Host   | `tsc` → `dist/index.js`（ESM，Node 22+）                                                                                 |
 | Client | `esbuild` → `dist/client.js`（IIFE 包进 `__ModuleLoader__` 工厂，minify）                                                |
 | UI     | `@deepseek-ai/dsh-client-ui-primitives` 作为 external 从页面模块表取，不打包                                             |
-| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖，目前 49 个用例                                                    |
+| 测试   | `node --test` 直接跑 `.ts`（Node 24），零测试框架依赖，目前 50 个用例                                                    |
 | 规范   | Prettier（无分号、单引号、100 列）、ESLint（typescript-eslint）、Commitlint（Conventional Commits）、Husky + lint-staged |
 
 ```bash
@@ -74,9 +74,11 @@ docs/设计.md             设计与决策的唯一来源
 5. **写状态只走 DSH 注册表 API**（`unarchiveSession` / `detachSession` / `archiveSession` /
    `attachSession`），绝不直接改 `workspace.json`。原因见设计稿 §5.3。
 6. **删文件前先动文件、后动状态**（设计稿 §6.2）：文件移动失败等于什么都没发生。
-7. **「运行中」只认 `workspace/session-activity`。** `ctx.sessions.get(id)` 只表示会话已加载；
-   用它判断运行中会把「结束了但还开着」的对话误标成运行中。已加载但无活动的会话叫 `open`，
-   UI 显示「未关闭」，同样禁止删除。
+7. **「运行中」只认 `workspace/session-activity`。** 它聚合 turn、job、定时任务和子 Agent，是宿主
+   唯一能证明「有活在跑」的信号。`ctx.sessions.get(id)` 只表示会话加载进了宿主进程内存——那是
+   进程级注册表，看过的会话会一直留着，归档也不卸载，所以它既不代表用户还开着，也不代表在运行，
+   **不得**用它判断运行中或阻止删除。删一个加载在内存里的会话时，先 emit
+   `workspace/session-stop` 停掉残留活动（设计稿 §6.2 第 0 步）。
 8. **不做插件配置。** 不引 `settings.json`、`getSettings/setSettings`、`cordis.patch.yml`
    的 `config`。安全边界用常量固定；每页条数/排序只是页面可见控件，不持久化。
 9. **UI primitives 保持 external。** `@deepseek-ai/dsh-client-ui-primitives` 从页面模块表取，
@@ -165,17 +167,17 @@ npm 类型包。`src/client/primitives.d.ts` 只声明实际用到的组件；�
 
 ### 6.6 状态语义
 
-- `running`：已加载 + `workspace/session-activity` 非空；
-- `open`：已加载 + 无活动；
+- `running`：`workspace/session-activity` 非空（turn / job / 定时任务 / 子 Agent）；
 - `missing`：归档 id 存在但目录不在；
-- `ok`：目录存在、未加载、无活动。
+- `ok`：目录存在、宿主没有活动。
 
-删除预检和列表状态必须用同一个判定，不要在 Client 里另写一套。
+状态里没有「已加载/未关闭」：「加载在内存」是进程级注册表，不是用户可见状态。删除预检和列表状态
+必须用同一个判定（都只看活动瀑布），不要在 Client 里另写一套。
 
 ## 7. 边界
 
 - 不清理 `~/.dsh/attachments`（内容寻址、跨会话共享）。
-- 只操作归档集合内的会话；运行中或仍打开（`open`）的会话一律跳过。
+- 只操作归档集合内的会话；有活动在跑的会话先停活动再删，停不下来则跳过。
 - Agent 工具不提供彻底删除；不可恢复的操作只由人在面板里做。
 - 插件是"用户态"工具：不做账号、网络、遥测。
 - 不做插件配置；不新增 `settings.json` 或配置页。
